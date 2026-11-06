@@ -244,13 +244,17 @@ async function main() {
     VIX: "^VIX", TNX: "^TNX", DXY: "DX-Y.NYB", WTI: "CL=F", BRENT: "BZ=F",
     NVDA: "NVDA", AMD: "AMD", MU: "MU", AVGO: "AVGO", AAPL: "AAPL", MSFT: "MSFT",
   };
+  // 行情列點開時的走勢圖
+  const SERIES = { TWII: "6mo", SOX: "6mo", IXIC: "6mo", GSPC: "6mo", DJI: "6mo", TSM: "6mo" };
+  market.series = { ...(pMarket?.series || {}) };
   let yOk = 0;
   for (const [k, sym] of Object.entries(YH)) {
     try {
-      const j = await get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=${k === "TWII" ? "6mo" : "10d"}&interval=1d`);
+      const long = SERIES[k];
+      const j = await get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=${long || "10d"}&interval=1d`);
       const r = L.parseYahooChart(j);
       if (r) { market.us[k] = r; yOk++; }
-      if (k === "TWII") { const s = L.parseYahooSeries(j); if (s) market.twiiSeries = s; }
+      if (long) { const s = L.parseYahooSeries(j); if (s) { market.series[k] = s; if (k === "TWII") market.twiiSeries = s; } }
     } catch (e) { log("Yahoo", sym, e.message); }
     await sleep(350);
   }

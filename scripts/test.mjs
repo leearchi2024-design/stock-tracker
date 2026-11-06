@@ -161,6 +161,22 @@ t("盤中報價（證交所基本市況報導）", () => {
   assert.equal(L.isMarketHours({ wd: 6, hour: 10, minute: 0 }), false);
 });
 
+t("重大新聞評分", () => {
+  assert.ok(L.importance("台積電法說會上調財測 股價大漲 5%") >= 3);
+  assert.ok(L.importance("聯準會宣布降息 美股大漲") >= 3);
+  assert.ok(L.importance("加權指數重挫 1,374 點") >= 3);
+  assert.ok(L.importance("某公司舉辦員工旅遊") < 3);
+  assert.ok(L.importance("鴻海參加展覽", 4) >= 3); // 多家媒體同時報導
+  const now = Date.parse("2026-11-06T04:00:00Z");
+  const a = { t: "台積電股價大漲", u: "https://a", src: "經濟日報", time: "2026-11-06T03:00:00Z" };
+  const m = L.mergeNews([[a, { ...a, src: "鉅亨網", u: "https://b" }, { ...a, src: "工商時報", u: "https://c" }]], { now });
+  assert.equal(m.length, 1);
+  assert.equal(m[0].n, 3);
+  assert.equal(m[0].major, true);
+  // 上一次存的 n 會保留
+  assert.equal(L.mergeNews([m], { now })[0].n, 3);
+});
+
 t("歷史資料庫：插入、補洞、裁切", () => {
   const s = L.emptyStore();
   L.upsertDay(s, "2026-11-04", "c", { "2330": 2260 });

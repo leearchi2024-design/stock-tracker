@@ -323,8 +323,23 @@ export function classify(title, hints = []) {
   return { impact: s > 0 ? 1 : s < 0 ? -1 : 0, tags, cats: [...cats].sort(), people };
 }
 
-/** 合併多個來源的新聞：去重、排序、限定天數與筆數。 */
-/** 合併多個來源的新聞：去重（重複的合併分類來源）、排序、限定天數與筆數。項目可帶 hints（抓取來源分類）。 */
+// ---------- 重大新聞評分 ----------
+const MAJOR_WORDS = /重大訊息|重訊|漲停|跌停|暴跌|崩跌|重挫|大跌|大漲|飆漲|狂飆|創新高|歷史新高|創新低|熔斷|停牌|暫停交易|下市|併購|收購|合併|私有化|增資|減資|庫藏股|法說|財報|EPS|每股盈餘|營收創|財測|目標價|升評|降評|調升評等|調降評等|聯準會|Fed|FOMC|升息|降息|利率決議|非農|CPI|通膨|關稅|制裁|出口管制|禁令|地震|颱風|戰爭|衝突|斷頭|違約/gi;
+const MOVERS = /台積電|加權|台股|大盤|外資|費半|那斯達克|道瓊|輝達|美光|聯發科|鴻海/;
+
+/** 新聞重要度：事件關鍵字、是否牽動大盤、幾家媒體同時報導、漲跌幅度。3 分以上算「重大」。 */
+export function importance(title, sources = 1) {
+  const t = String(title ?? "");
+  let s = Math.min(2, (t.match(MAJOR_WORDS) || []).length) * 1.5;
+  if (MOVERS.test(t)) s += 1;
+  if (sources >= 2) s += 1;
+  if (sources >= 4) s += 1;
+  if ([...t.matchAll(/(\d+(?:\.\d+)?)\s*[%％]/g)].some((m) => +m[1] >= 3)) s += 1;
+  if (/[千百]點|\d{3,}\s*點/.test(t)) s += 1;
+  return Math.round(s * 10) / 10;
+}
+
+/** 合併多個來源的新聞：去重（重複的合併分類來源、計算幾家報導）、排序、限定天數與筆數。項目可帶 hints（抓取來源分類）。 */
 export function mergeNews(lists, { now = Date.now(), days = 3, limit = 220 } = {}) {
   const byKey = new Map();
   const norm = (t) => t.replace(/[\s「」『』"'“”：:，,。！!？?（）()【】\[\]｜|\-—–]/g, "").slice(0, 40);
@@ -333,13 +348,23 @@ export function mergeNews(lists, { now = Date.now(), days = 3, limit = 220 } = {
     if (!k) continue;
     if (it.time && now - Date.parse(it.time) > days * 864e5) continue;
     const hints = [...(it.hints || []), ...(it.cats || []).filter((c) => c === "us")];
+    const srcs = new Set([...(it.srcs || []), it.src].filter(Boolean));
     const cur = byKey.get(k);
-    if (cur) { cur.hints = [...new Set([...cur.hints, ...hints])]; continue; }
-    byKey.set(k, { t: it.t, u: it.u, src: it.src, time: it.time, hints });
+    if (cur) {
+      cur.hints = [...new Set([...cur.hints, ...hints])];
+      for (const x of srcs) cur.srcs.add(x);
+      cur.n = Math.max(cur.n, it.n || 1, cur.srcs.size);
+      if (it.codes) cur.codes = [...new Set([...(cur.codes || []), ...it.codes])];
+      continue;
+    }
+    byKey.set(k, { t: it.t, u: it.u, src: it.src, time: it.time, hints, srcs, n: Math.max(it.n || 1, srcs.size), codes: it.codes });
   }
   const out = [];
   for (const it of byKey.values()) {
-    out.push({ t: it.t, u: it.u, src: it.src, time: it.time, ...classify(it.t, it.hints) });
+    const score = importance(it.t, it.n);
+    const o = { t: it.t, u: it.u, src: it.src, time: it.time, ...classify(it.t, it.hints), n: it.n, score, major: score >= 3 };
+    if (it.codes?.length) o.codes = it.codes;
+    out.push(o);
     if (out.length >= limit) break;
   }
   return out;

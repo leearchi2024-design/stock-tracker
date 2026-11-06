@@ -344,9 +344,10 @@ function upcoming(days = 45) {
 }
 
 /* ---------- 渲染：市場列與新聞 ---------- */
-function tick(label, o, digits = 2, extra = "") {
-  if (!o || o.close == null) return `<div class="tick"><span>${label}</span><b>—</b><small class="flat">尚無資料</small></div>`;
-  return `<div class="tick"><span>${label}・${md(o.date)}</span><b class="${cls(o.chg)}">${fmt(o.close, digits)}</b><small class="${cls(o.chg)}">${o.chg != null ? (o.chg > 0 ? "▲" : o.chg < 0 ? "▼" : "") + fmt(Math.abs(o.chg), digits) + "　" + fmtP(o.pct) : ""}</small>${extra}</div>`;
+function tick(label, o, digits = 2, extra = "", key = "") {
+  const attr = key ? ` data-tick="${key}" aria-haspopup="dialog" aria-label="${esc(label.replace(/<[^>]*>/g, ""))}，點開看走勢與相關新聞"` : "";
+  if (!o || o.close == null) return `<button type="button" class="tick"${attr}><span>${label}</span><b>—</b><small class="flat">尚無資料</small></button>`;
+  return `<button type="button" class="tick"${attr}><span>${label}・${md(o.date)}</span><b class="${cls(o.chg)}">${fmt(o.close, digits)}</b><small class="${cls(o.chg)}">${o.chg != null ? (o.chg > 0 ? "▲" : o.chg < 0 ? "▼" : "") + fmt(Math.abs(o.chg), digits) + "　" + fmtP(o.pct) : ""}</small>${extra}<i class="more" aria-hidden="true">▶</i></button>`;
 }
 function renderTape() {
   const m = AUTO.market;
@@ -360,7 +361,7 @@ function renderTape() {
     const tw = AUTO.quotes?.q?.["2330"]?.[1];
     adr = `<small class="sub">折台股 ${fmt(conv, 0)} 元${tw ? `，溢價 ${fmtP(((conv - tw) / tw) * 100)}` : ""}</small>`;
   }
-  $("#tape").innerHTML = tick(taiex?.live ? `加權指數・盤中 ${liveTime() || ""}` : "加權指數", taiex) + tick("費城半導體", us.SOX) + tick("那斯達克", us.IXIC) + tick("標普 500", us.GSPC) + tick("台積電 ADR（美元）", us.TSM, 2, adr);
+  $("#tape").innerHTML = tick(taiex?.live ? `加權指數・盤中 ${liveTime() || ""}` : "加權指數", taiex, 2, "", "TWII") + tick("費城半導體", us.SOX, 2, "", "SOX") + tick("那斯達克", us.IXIC, 2, "", "IXIC") + tick("標普 500", us.GSPC, 2, "", "GSPC") + tick("台積電 ADR（美元）", us.TSM, 2, adr, "TSM");
 }
 function newsItem(n, mine) {
   const k = n.impact > 0 ? "bull" : n.impact < 0 ? "bear" : "", lab = n.impact > 0 ? "利多" : n.impact < 0 ? "利空" : "中性";
@@ -406,9 +407,12 @@ function newsPanel(title, items, limit = 20, sub = "", lead = false) {
   return `<div class="panel"><div class="sec-head"><h2>${esc(title)}</h2><span class="label">${esc(sub || (AUTO.news?.updatedAt ? `${items.length} 則・${mdhm(AUTO.news.updatedAt)} 更新` : ""))}</span></div>${newsList(items, limit, undefined, lead ? title : "")}</div>`;
 }
 const usq = (k) => AUTO.market?.us?.[k] || null;
+const TICK_KEY = { "道瓊": "DJI", "標普 500": "GSPC", "那斯達克": "IXIC", "費城半導體": "SOX", "台積電 ADR": "TSM", "VIX 恐慌指數": "VIX", "10 年期美債殖利率": "TNX", "美元指數": "DXY", "美元兌新台幣": "TWD", "WTI 原油": "WTI", "布蘭特原油": "BRENT" };
 function miniTick(label, o, digits = 2, note = "", unit = "") {
-  if (!o || o.close == null) return `<div class="tick"><span>${esc(label)}</span><b>—</b><small class="flat">尚無資料</small></div>`;
-  return `<div class="tick"><span>${esc(label)}・${md(o.date)}</span><b class="${cls(o.chg)}">${fmt(o.close, digits)}${unit}</b><small class="${cls(o.chg)}">${o.chg != null ? (o.chg > 0 ? "▲" : o.chg < 0 ? "▼" : "") + fmt(Math.abs(o.chg), digits) + "　" + fmtP(o.pct) : ""}</small>${note ? `<em>${note}</em>` : ""}</div>`;
+  const k = TICK_KEY[label] || "";
+  const attr = k ? ` data-tick="${k}" aria-haspopup="dialog" aria-label="${esc(label)}，點開看走勢與相關新聞"` : "";
+  if (!o || o.close == null) return `<button type="button" class="tick"${attr}><span>${esc(label)}</span><b>—</b><small class="flat">尚無資料</small></button>`;
+  return `<button type="button" class="tick"${attr}><span>${esc(label)}・${md(o.date)}</span><b class="${cls(o.chg)}">${fmt(o.close, digits)}${unit}</b><small class="${cls(o.chg)}">${o.chg != null ? (o.chg > 0 ? "▲" : o.chg < 0 ? "▼" : "") + fmt(Math.abs(o.chg), digits) + "　" + fmtP(o.pct) : ""}</small>${note ? `<em>${note}</em>` : ""}<i class="more" aria-hidden="true">▶</i></button>`;
 }
 /** 上漲紅、下跌綠的長條圖（0 在中間） */
 function barChart(vals, labels = []) {
@@ -594,6 +598,58 @@ function renderStatus() {
   $("#srcStatus").innerHTML = `<p class="sub" style="margin:0 0 6px">最後執行 ${mdhm(st.updatedAt)}・歷史 ${st.days} 個交易日（${md(st.firstDay)}～${md(st.lastDay)}）</p>
     <ul class="srcs">${Object.entries(st.sources || {}).map(([k, v]) => `<li><span class="${v.ok ? "k" : "x"}">${v.ok ? "✓" : "✗"}</span><span>${esc(SRC_NAMES[k] || k)}<br><small class="sub">${esc(v.msg || "")}</small></span><span class="sub num">${mdhm(v.at)}</span></li>`).join("")}</ul>`;
 }
+
+
+/* ---------- 行情列點開：走勢、相關新聞、TradingView ---------- */
+const TICKS = {
+  TWII: { name: "加權指數", tv: "TWSE:IX0001", re: /加權|台股|大盤|台指|萬點|千點/, tab: "market", note: "台積電權重高，漲跌常直接左右大盤。" },
+  SOX: { name: "費城半導體指數", tv: "NASDAQ:SOX", re: /費半|費城半導體|半導體|晶片|晶圓/, note: "台股權重以半導體為主，費半大漲大跌，台股電子股通常同方向反應。" },
+  IXIC: { name: "那斯達克指數", tv: "NASDAQ:IXIC", re: /那斯達克|那指|科技股|七巨頭/, note: "AI 資本支出的主要買家集中在那斯達克，巨頭擴大支出時台灣 AI 供應鏈受惠。" },
+  GSPC: { name: "標普 500 指數", tv: "SP:SPX", re: /標普|S&P|美股/, note: "美國大型股整體表現。" },
+  DJI: { name: "道瓊工業指數", tv: "DJ:DJI", re: /道瓊|美股/, note: "美國傳統產業與藍籌股表現。" },
+  TSM: { name: "台積電 ADR", tv: "NYSE:TSM", re: /台積電|ADR/, note: "1 單位 ADR = 5 股台股；ADR 溢價或折價會影響台積電隔天開盤。" },
+  VIX: { name: "VIX 恐慌指數", tv: "TVC:VIX", re: /VIX|恐慌/, note: "大於 20 偏緊張，大於 30 屬高度恐慌。" },
+  TNX: { name: "10 年期美債殖利率", tv: "TVC:US10Y", re: /美債|殖利率/, note: "代表資金成本，殖利率上升通常壓抑高本益比科技股。", unit: "%" },
+  DXY: { name: "美元指數", tv: "TVC:DXY", re: /美元/, note: "美元走弱時，外資較可能匯入台股。" },
+  TWD: { name: "美元兌新台幣", tv: "FX_IDC:USDTWD", re: /新台幣|台幣|匯率/, note: "數字下降代表台幣升值，通常吸引外資匯入。" },
+  WTI: { name: "WTI 原油", tv: "TVC:USOIL", re: /油價|原油|WTI/, note: "油價大漲推升通膨與升息壓力，不利股市。" },
+  BRENT: { name: "布蘭特原油", tv: "TVC:UKOIL", re: /油價|原油|布蘭特/, note: "國際油價基準之一。" },
+};
+function tickData(k) {
+  if (k === "TWII") {
+    const tq = liveQ("t00");
+    if (tq) return { close: tq[0], chg: +(tq[0] - tq[1]).toFixed(2), pct: +(((tq[0] - tq[1]) / tq[1]) * 100).toFixed(2), date: todayStr(), live: true };
+    return AUTO.market?.taiex || usq("TWII");
+  }
+  return usq(k);
+}
+function openTick(k) {
+  const meta = TICKS[k]; if (!meta) return;
+  const o = tickData(k), sr = AUTO.market?.series?.[k] || (k === "TWII" ? AUTO.market?.twiiSeries : null);
+  const news = (AUTO.news?.items || []).filter((n) => meta.re.test(n.t)).slice(0, 6);
+  const c = sr?.c || [], n = c.length, ma = (p) => (n >= p ? c.slice(-p).reduce((a, b) => a + b, 0) / p : null);
+  const last = o?.close ?? c[n - 1], m20 = ma(20), m60 = ma(60);
+  const unit = meta.unit || "";
+  $("#sheetBody").innerHTML = `
+    <div class="sheet-head"><h2 id="sheetTitle">${esc(meta.name)}</h2><button type="button" class="ghost" data-sheetclose aria-label="關閉">✕ 關閉</button></div>
+    <div class="row" style="gap:14px;align-items:baseline"><span class="big ${cls(o?.chg)}">${o ? fmt(o.close, 2) + unit : "—"}</span>
+      <span class="num ${cls(o?.chg)}">${o?.chg != null ? (o.chg > 0 ? "▲" : o.chg < 0 ? "▼" : "") + fmt(Math.abs(o.chg), 2) + "　" + fmtP(o.pct) : ""}</span>
+      <span class="sub">${o ? (o.live ? `盤中 ${esc(liveTime() || "")}` : md(o.date) + " 收盤") : ""}</span></div>
+    ${sr ? `<div class="chart">${indexChart(sr)}</div>
+      <dl class="kv"><dt>月線（20 日）</dt><dd>${fmt(m20, 2)}${m20 && last ? `（距 ${fmtP(((last - m20) / m20) * 100)}）` : ""}</dd><dt>季線（60 日）</dt><dd>${fmt(m60, 2)}${m60 && last ? `（距 ${fmtP(((last - m60) / m60) * 100)}）` : ""}</dd></dl>`
+      : `<p class="sub" style="margin:0">走勢圖會在下一次完整更新後出現。</p>`}
+    <p class="notice info" style="margin:0">${esc(meta.note)}</p>
+    <div class="row">
+      <a class="tvlink" href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(meta.tv)}" target="_blank" rel="noopener noreferrer">在 TradingView 開啟 ↗<small>分時、技術指標</small></a>
+      ${meta.tab ? `<button type="button" data-sheetgo="${meta.tab}">看大盤資訊 ▶</button>` : ""}
+    </div>
+    <h3>相關新聞</h3>
+    ${news.length ? `<div class="news">${news.map((x) => newsItem({ ...x, when: mdhm(x.time) }, false)).join("")}</div>` : `<div class="empty"><span>近 3 天沒有相關新聞</span></div>`}`;
+  const d = $("#sheet");
+  if (typeof d.showModal === "function") { if (!d.open) d.showModal(); } else d.setAttribute("open", "");
+  d.querySelector("[data-sheetclose]")?.focus();
+}
+function closeSheet() { const d = $("#sheet"); if (d.open) { if (typeof d.close === "function") d.close(); else d.removeAttribute("open"); } }
 
 /* ---------- 渲染：股票追蹤 ---------- */
 let openCode = null;
@@ -943,6 +999,9 @@ document.addEventListener("click", (e) => {
   if (ds.toggle) { openCode = openCode === ds.toggle ? null : ds.toggle; renderWatch(); return; }
   if (ds.trend) { trendTab = ds.trend; lsSet("st.trend", trendTab); renderTrend(); return; }
   if (ds.addwatch) { if (!S.watch.some((w) => w.code === ds.addwatch)) { S.watch.push(newStock(ds.addwatch, ds.name || ds.addwatch)); commit(); renderWatch(); renderTrend(); } return; }
+  if (ds.tick) { openTick(ds.tick); return; }
+  if ("sheetclose" in ds) { closeSheet(); return; }
+  if (ds.sheetgo) { closeSheet(); trendTab = ds.sheetgo; lsSet("st.trend", trendTab); location.hash = "news"; renderTrend(); setTimeout(() => $("#trendTabs").scrollIntoView({ behavior: "smooth", block: "start" }), 50); return; }
   if (ds.krange) { chartRange.n = +ds.krange; lsSet("st.krange", ds.krange); renderWatch(); return; }
   if (ds.acct) { curAcct = ds.acct; renderAccount(); return; }
   if (ds.trade) {
