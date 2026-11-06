@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; connect-src 'self' https://www.googleapis.com https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#1d58a8">
+<title>股票追蹤器</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@700;900&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css">
+<script src="config.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="brand"><h1>股票追蹤器</h1><span class="clock num" id="clock">—</span></div>
+    <span class="phase" id="phase"><i></i><span>—</span></span>
+    <button class="syncpill" id="syncPill" type="button">雲端同步</button>
+    <nav class="tabs" aria-label="功能">
+      <a href="#news" data-v="news">重大新聞</a>
+      <a href="#track" data-v="track">股票追蹤</a>
+      <a href="#account" data-v="account">我的帳號</a>
+      <a href="#guide" data-v="guide">分析要點</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- 重大新聞 -->
+  <section class="view" id="v-news">
+    <div class="tape" id="tape"></div>
+    <div class="desk">
+      <div class="view">
+        <div class="panel">
+          <div class="sec-head"><h2>重大新聞</h2><span class="sub" id="newsStamp"></span></div>
+          <div class="filters" id="newsFilter" role="group" aria-label="篩選新聞"></div>
+          <div class="news" id="newsList"></div>
+          <p class="sub" style="margin:0">利多／利空由標題關鍵字自動判斷，只是初步分類，請點進原文確認。</p>
+        </div>
+        <div class="panel">
+          <div class="sec-head"><h2>我的新聞筆記</h2><span class="sub">標註相關代號後，會一起納入消息面判斷</span></div>
+          <form class="form" id="noteForm">
+            <label class="full">標題<input id="noteTitle" required maxlength="120" placeholder="例：台積電法說會上調全年營收指引"></label>
+            <label>影響<select id="noteImpact"><option value="1">利多</option><option value="0" selected>中性</option><option value="-1">利空</option></select></label>
+            <label>相關代號<input id="noteCodes" placeholder="2330, 2454"></label>
+            <label>日期<input type="date" id="noteDate"></label>
+            <button class="primary" type="submit">新增筆記</button>
+          </form>
+          <div class="news" id="myNotes"></div>
+        </div>
+      </div>
+      <aside class="view">
+        <div class="panel">
+          <div class="sec-head"><h3>今日盤勢時間軸</h3><span class="sub" id="usNote"></span></div>
+          <ul class="tl" id="todayTl"></ul>
+        </div>
+        <div class="panel">
+          <div class="sec-head"><h3>近期重要日程</h3><span class="sub">未來 45 天</span></div>
+          <div id="events"></div>
+          <p class="sub" style="margin:0">依一般慣例推算，遇國定假日會順延，以官方公告為準。</p>
+        </div>
+        <div class="panel">
+          <details id="srcBox"><summary>自動資料更新狀態</summary><div id="srcStatus"></div></details>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- 股票追蹤 -->
+  <section class="view" id="v-track" hidden>
+    <div class="sec-head"><h2>股票追蹤</h2><span class="sub">點開個股看四面向判斷；標「自動」的數據每天由公開資料更新</span></div>
+    <div class="notice info" id="refNote"></div>
+    <div class="wl" id="watch"></div>
+    <div class="panel">
+      <h3>加入觀察</h3>
+      <form class="form" id="addStock">
+        <label>股票代號<input id="asCode" required maxlength="6" placeholder="2330" inputmode="numeric" autocomplete="off"></label>
+        <label>名稱<input id="asName" required maxlength="20" placeholder="輸入代號會自動帶入"></label>
+        <button class="primary" type="submit">加入</button>
+      </form>
+      <div class="err" id="asErr"></div>
+    </div>
+  </section>
+
+  <!-- 我的帳號 -->
+  <section class="view" id="v-account" hidden>
+    <div class="panel sync" id="syncPanel"></div>
+    <div class="sec-head"><h2>我的帳號</h2><span class="sub" id="saveState"></span></div>
+    <div class="acctbar" id="acctBar"></div>
+    <div class="stats" id="acctStats"></div>
+    <div class="desk">
+      <div class="view">
+        <div class="panel">
+          <div class="sec-head"><h3>目前持股</h3><span class="sub">平均成本含手續費；市值用最新收盤價</span></div>
+          <div id="holdings"></div>
+        </div>
+        <div class="panel">
+          <div class="sec-head"><h3>交易與資金紀錄</h3><span class="sub" id="histCount"></span></div>
+          <div id="history"></div>
+        </div>
+      </div>
+      <aside class="view">
+        <div class="panel">
+          <div class="row" style="justify-content:space-between"><h3>下單紀錄</h3>
+            <div class="seg" role="group" aria-label="買賣"><button class="b" id="sideB" aria-pressed="true" type="button">買入</button><button class="s" id="sideS" aria-pressed="false" type="button">賣出</button></div></div>
+          <form class="form two" id="tradeForm">
+            <label class="full">帳戶<select id="tAcct"></select></label>
+            <label>股票代號<input id="tCode" list="codeList" required maxlength="6" autocomplete="off"></label>
+            <label>名稱<input id="tName" maxlength="20"></label>
+            <label>股數<input id="tQty" type="number" min="1" step="1" required placeholder="1000 = 1 張"></label>
+            <label>成交價<input id="tPrice" type="number" min="0" step="0.01" required></label>
+            <label class="full">成交時間<input id="tTime" type="datetime-local" required></label>
+            <label>手續費<input id="tFee" type="number" min="0" step="1"></label>
+            <label>證交稅<input id="tTax" type="number" min="0" step="1"></label>
+            <label class="full">備註（買賣理由）<input id="tNote" maxlength="120" placeholder="例：KD 低檔黃金交叉＋外資連買"></label>
+            <dl class="kv full" id="tPreview"></dl>
+            <button class="primary full" type="submit" id="tSubmit">記錄買入</button>
+          </form>
+          <div class="err" id="tErr"></div>
+          <datalist id="codeList"></datalist>
+        </div>
+        <div class="panel">
+          <h3>資金存入／提出</h3>
+          <form class="form two" id="cashForm">
+            <label>類型<select id="cType"><option value="deposit">存入</option><option value="withdraw">提出</option></select></label>
+            <label>金額<input id="cAmt" type="number" min="1" step="1" required></label>
+            <label class="full">日期時間<input id="cTime" type="datetime-local" required></label>
+            <button class="primary full" type="submit">記錄</button>
+          </form>
+          <div class="err" id="cErr"></div>
+        </div>
+        <div class="panel">
+          <h3>帳戶設定</h3>
+          <form class="form two" id="acctForm">
+            <label class="full">帳戶名稱<input id="aName" maxlength="30" required></label>
+            <label>手續費折數<input id="aDisc" type="number" min="0.1" max="1" step="0.01" title="1 = 不打折，0.28 = 2.8 折"></label>
+            <label>最低手續費<input id="aMin" type="number" min="0" step="1"></label>
+            <button type="submit">儲存設定</button>
+            <button type="button" id="aNew">新增帳戶</button>
+          </form>
+          <div class="row" id="aDelRow"></div>
+        </div>
+        <div class="panel">
+          <h3>備份與還原</h3>
+          <p class="sub" style="margin:0">下載一份備份檔存到自己的地方。有設同步密碼的話，備份檔也會加密。</p>
+          <button type="button" id="exportBtn">下載備份檔</button>
+          <label>從備份檔還原（會和目前資料合併，不會覆蓋）<input type="file" id="importFile" accept="application/json,.json"></label>
+          <div class="err" id="bkErr"></div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- 分析要點 -->
+  <section class="view" id="v-guide" hidden>
+    <div class="callout">股價短期看「資金與情緒」，長期看「公司獲利」。以下整理自 Notion「分析要點」，為一般分析框架，不構成投資建議。</div>
+    <h2>影響股價的六大因素</h2>
+    <div class="factors" id="factors"></div>
+    <h2>四種分析方法</h2>
+    <div class="tbl"><table><thead><tr><th>方法</th><th>回答的問題</th><th>主要看什麼</th><th>適合</th><th>本 APP 的判斷規則</th></tr></thead><tbody id="methods"></tbody></table></div>
+    <h2>公布時間表</h2>
+    <div id="schedules" class="view"></div>
+    <div class="callout y">金控、銀行、證券、保險業的季報期限與一般公司不同，大致相差約兩週，追蹤金融股時要另外確認。</div>
+    <h2>常用查詢網站</h2>
+    <div class="tbl"><table><tbody id="sites"></tbody></table></div>
+  </section>
+  <footer class="disc">訊號依規則自動整理，僅供參考，不構成投資建議。股價為每日收盤資料，不是盤中即時報價。</footer>
+</main>
+</body>
+</html>
