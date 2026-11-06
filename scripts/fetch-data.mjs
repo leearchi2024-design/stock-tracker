@@ -7,6 +7,8 @@ import * as L from "./lib.mjs";
 
 const OUT = path.resolve(process.argv[2] || "_site/data");
 const SITE = (process.env.SITE_URL || "").replace(/\/$/, "");
+// MODE=news：只更新新聞與美股報價（每 15 分鐘），其餘沿用上次；MODE=full：全部重抓
+const MODE = process.env.MODE === "news" ? "news" : "full";
 const BACKFILL = Math.max(0, Math.min(120, parseInt(process.env.BACKFILL || "0", 10) || 0));
 const UA = "Mozilla/5.0 (compatible; stock-tracker/1.0; +https://github.com)";
 const TPE = "Asia/Taipei";
@@ -139,6 +141,11 @@ async function main() {
   const [pStore, pMarket, pQuotes, pRevenue, pNews, pStatus] = await Promise.all(["store.json", "market.json", "quotes.json", "revenue.json", "news.json", "status.json"].map(prev));
   const store = L.normalizeStore(pStore || L.emptyStore());
   Object.assign(status, pStatus?.sources || {});
+  const FULL = MODE === "full" || !pStore || !pQuotes || !pMarket;
+  log(FULL ? "完整更新" : "快速更新：只抓新聞與美股");
+  const quotes = { date: pQuotes?.date || null, q: Object.fromEntries(Object.entries(pQuotes?.q || {}).filter(([k]) => L.CODE_RE.test(k))) };
+  let tradeDate = null, instiDate = store.days[store.days.length - 1] || null;
+  if (FULL) {
 
   // 1. 第一次執行或手動要求時補抓歷史
   const need = BACKFILL || (store.days.length < 20 ? 70 : 0);
@@ -150,8 +157,6 @@ async function main() {
   }
 
   // 2. 最新收盤（上市＋上櫃）
-  const quotes = { date: pQuotes?.date || null, q: Object.fromEntries(Object.entries(pQuotes?.q || {}).filter(([k]) => L.CODE_RE.test(k))) };
-  let tradeDate = null;
   try {
     const tw = L.parseTwseDayAll(await get(`${TWSE_OPEN}/exchangeReport/STOCK_DAY_ALL`));
     const n = Object.keys(tw.rows).length;
@@ -197,7 +202,7 @@ async function main() {
   for (const [k, row] of Object.entries(quotes.q)) if (row[4] == null && pQuotes?.q?.[k]) { row[4] = pQuotes.q[k][4]; row[5] = pQuotes.q[k][5]; row[6] = pQuotes.q[k][6]; }
 
   // 4. 三大法人（約 15:00–16:00 公布）
-  const instiDate = tradeDate || store.days[store.days.length - 1];
+  instiDate = tradeDate || store.days[store.days.length - 1];
   if (instiDate && (instiDate < now.date || now.hour >= 15)) {
     try {
       const r = await fetchT86(instiDate);
@@ -226,9 +231,11 @@ async function main() {
     } catch (e) { fail("twse_margin", e); }
   }
 
+  } // FULL：收盤、本益比、法人、融資
+
   // 6. 大盤與美股
-  const market = { updatedAt: new Date().toISOString(), tradeDate: quotes.date, taiex: pMarket?.taiex || null, us: { ...(pMarket?.us || {}) } };
-  try {
+  const market = { ...(pMarket || {}), updatedAt: new Date().toISOString(), tradeDate: quotes.date, taiex: pMarket?.taiex || null, us: { ...(pMarket?.us || {}) } };
+  if (FULL) try {
     const t = L.parseTaiex(await get(`${TWSE_OPEN}/exchangeReport/MI_INDEX`));
     if (!t) throw new Error("找不到加權指數");
     market.taiex = { ...t, date: t.date || quotes.date };
@@ -257,8 +264,8 @@ async function main() {
   // 三大法人買賣金額（億元），保留最近 40 個交易日
   const insti = new Map((pMarket?.insti || []).map((x) => [x.date, x]));
   const instiDays = [];
-  if (instiDate && (instiDate < now.date || now.hour >= 15)) instiDays.push(instiDate);
-  if (insti.size < 5) for (const d of weekdaysBack(instiDate || now.date, 15)) if (!instiDays.includes(d)) instiDays.push(d);
+  if (FULL && instiDate && (instiDate < now.date || now.hour >= 15)) instiDays.push(instiDate);
+  if (FULL && insti.size < 5) for (const d of weekdaysBack(instiDate || now.date, 15)) if (!instiDays.includes(d)) instiDays.push(d);
   let instiGot = 0;
   for (const d of instiDays) {
     if (insti.has(d) && d !== instiDate) continue;
@@ -276,7 +283,7 @@ async function main() {
 
   // 7. 月營收（每月 10 日前公布）
   let revenue = pRevenue || { ym: null, r: {} };
-  try {
+  if (FULL) try {
     const a = L.parseRevenue(await get(`${TWSE_OPEN}/opendata/t187ap05_L`));
     const b = L.parseRevenue(await get(`${TPEX_OPEN}/mopsfin_t187ap05_O`).catch(() => []));
     const n = Object.keys(a.rows).length + Object.keys(b.rows).length;
@@ -321,7 +328,7 @@ async function main() {
   await w("market.json", market);
   await w("revenue.json", revenue);
   await w("news.json", news);
-  await w("status.json", { updatedAt: new Date().toISOString(), days: store.days.length, firstDay: store.days[0] || null, lastDay: store.days[store.days.length - 1] || null, sources: status });
+  await w("status.json", { updatedAt: new Date().toISOString(), mode: FULL ? "full" : "news", fullAt: FULL ? new Date().toISOString() : pStatus?.fullAt || null, days: store.days.length, firstDay: store.days[0] || null, lastDay: store.days[store.days.length - 1] || null, sources: status });
   let shards = 0;
   for (const code of L.storeCodes(store)) {
     const s = L.shardOf(store, code);

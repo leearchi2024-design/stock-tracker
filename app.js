@@ -29,7 +29,7 @@ const md = (iso) => (iso ? `${+iso.slice(5, 7)}/${+iso.slice(8, 10)}` : "—");
 
 /* ---------- 自動資料（GitHub Actions 每天產生） ---------- */
 const AUTO = { market: null, news: null, quotes: null, revenue: null, status: null, hist: {}, loadedAt: 0 };
-const bust = () => Math.floor(Date.now() / 300000);
+const bust = () => Math.floor(Date.now() / 60000);
 async function getJson(p) {
   const r = await fetch(`${p}?t=${bust()}`, { cache: "no-store" });
   if (!r.ok) throw new Error(String(r.status));
@@ -1096,3 +1096,13 @@ sync.state = initialSyncState();
 saveLocal(); renderAll();
 loadAuto();
 setInterval(() => { renderClock(); if (!$("#v-news").hidden) renderTrend(); }, 60000);
+// 開著 APP 時每 5 分鐘重讀新聞與美股（GitHub 每 15 分鐘更新一次）
+async function refreshLight() {
+  if (document.visibilityState !== "visible") return;
+  const names = ["news", "market", "status"];
+  const res = await Promise.allSettled(names.map((n) => getJson(`data/${n}.json`)));
+  let changed = false;
+  res.forEach((r, i) => { if (r.status === "fulfilled" && JSON.stringify(r.value?.updatedAt) !== JSON.stringify(AUTO[names[i]]?.updatedAt)) { AUTO[names[i]] = r.value; changed = true; } });
+  if (changed) { renderTape(); renderTrend(); renderWatch(); }
+}
+setInterval(refreshLight, 5 * 60000);
