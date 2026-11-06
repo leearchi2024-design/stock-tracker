@@ -37,11 +37,13 @@ async function getJson(p) {
 }
 async function loadAuto() {
   const names = ["market", "news", "quotes", "revenue", "status"];
-  const res = await Promise.allSettled(names.map((n) => getJson(`data/${n}.json`)));
+  let got = 0;
+  const res = await Promise.allSettled(names.map((n) => getJson(`data/${n}.json`).finally(() => splashProgress(++got))));
   res.forEach((r, i) => { if (r.status === "fulfilled") AUTO[names[i]] = r.value; });
   AUTO.loadedAt = Date.now();
   AUTO.hist = {};
   await loadHist(S.watch.map((w) => w.code));
+  splashProgress(6);
   renderAll();
 }
 async function loadHist(codes) {
@@ -343,15 +345,20 @@ function renderTape() {
 }
 function newsItem(n, mine) {
   const k = n.impact > 0 ? "bull" : n.impact < 0 ? "bear" : "", lab = n.impact > 0 ? "利多" : n.impact < 0 ? "利空" : "中性";
-  const tags = (n.tags || []).map((t) => `<span class="chip">${esc(t)}</span>`).join("");
+  const tags = (n.tags || []).filter((t) => t !== "我的筆記").map((t) => esc(t)).join("・");
   const codes = mine ? (n.codes || []).map((c) => `<span class="chip info">${esc(c)} ${esc(S.watch.find((w) => w.code === c)?.name || "")}</span>`).join("")
     : S.watch.filter((w) => n.t.includes(w.name) || n.t.includes(w.code)).map((w) => `<span class="chip info">${esc(w.code)} ${esc(w.name)}</span>`).join("");
   const title = mine ? esc(n.t) : `<a href="${esc(safeUrl(n.u))}" target="_blank" rel="noopener noreferrer">${esc(n.t)}</a>`;
-  return `<article><span class="stripe ${k}"></span>
-    <div class="meta"><span class="chip ${k}">${lab}</span><span class="num">${esc(n.when)}</span>${tags}${codes}</div>
+  return `<article>
+    <div class="meta"><span class="stamp ${k}">${lab}</span>${tags ? `<span>${tags}</span>` : ""}${mine ? `<span>我的筆記</span>` : ""}${codes}</div>
     <h3>${title}</h3>
-    <div class="meta">${mine ? `<button class="ghost danger" data-delnote="${esc(n.id)}">刪除筆記</button>` : esc(n.src || "")}</div>
+    <div class="meta">${mine ? `<span class="num">${esc(n.when)}</span><button class="ghost danger" data-delnote="${esc(n.id)}">刪除筆記</button>` : `${esc(n.src || "")}<span class="num">${esc(n.when)}</span>`}</div>
   </article>`;
+}
+function leadStory(n, section) {
+  const k = n.impact > 0 ? "bull" : n.impact < 0 ? "bear" : "";
+  return `<article class="lead"><div class="kicker"><span>HEADLINE</span><span class="stamp ${k}">${n.impact > 0 ? "利多" : n.impact < 0 ? "利空" : "中性"}</span><span class="num sub">${mdhm(n.time)}</span></div>
+    <h2><a href="${esc(safeUrl(n.u))}" target="_blank" rel="noopener noreferrer">${esc(n.t)}</a></h2><span class="byline">${esc(n.src || "")}・${esc(section)}</span></article>`;
 }
 /* ---------- 資訊趨勢 ---------- */
 const TREND = [
@@ -369,12 +376,15 @@ function newsOf(cat) {
   if (cat === "bear") return items.filter((n) => n.impact < 0);
   return items.filter((n) => (Array.isArray(n.cats) ? n.cats.includes(cat) : LEGACY[cat]?.(n)));
 }
-function newsList(items, limit = 20, empty = "這個分類目前沒有新聞") {
-  if (!AUTO.news) return `<div class="empty">還沒有自動新聞。GitHub Actions 每天 08:17、14:43、16:38、22:47 會更新。</div>`;
-  return items.length ? `<div class="news">${items.slice(0, limit).map((n) => newsItem({ ...n, when: mdhm(n.time) }, false)).join("")}</div>` : `<div class="empty">${esc(empty)}</div>`;
+function newsList(items, limit = 20, empty = "這個分類目前沒有新聞", lead = "") {
+  if (!AUTO.news) return `<div class="empty"><span>還沒有自動新聞。GitHub Actions 每天 08:17、14:43、16:38、22:47 會更新。</span></div>`;
+  if (!items.length) return `<div class="empty"><span>${esc(empty)}</span></div>`;
+  const list = items.slice(0, limit);
+  const head = lead ? leadStory(list.shift(), lead) : "";
+  return head + (list.length ? `<div class="news cols2">${list.map((n) => newsItem({ ...n, when: mdhm(n.time) }, false)).join("")}</div>` : "");
 }
-function newsPanel(title, items, limit = 20, sub = "") {
-  return `<div class="panel"><div class="sec-head"><h2>${esc(title)}</h2><span class="sub">${esc(sub || (AUTO.news?.updatedAt ? `${items.length} 則・更新於 ${mdhm(AUTO.news.updatedAt)}` : ""))}</span></div>${newsList(items, limit)}</div>`;
+function newsPanel(title, items, limit = 20, sub = "", lead = false) {
+  return `<div class="panel"><div class="sec-head"><h2>${esc(title)}</h2><span class="label">${esc(sub || (AUTO.news?.updatedAt ? `${items.length} 則・${mdhm(AUTO.news.updatedAt)} 更新` : ""))}</span></div>${newsList(items, limit, undefined, lead ? title : "")}</div>`;
 }
 const usq = (k) => AUTO.market?.us?.[k] || null;
 function miniTick(label, o, digits = 2, note = "", unit = "") {
@@ -388,7 +398,7 @@ function barChart(vals, labels = []) {
   const W = 600, H = 84, P = 4, mx = Math.max(1e-9, ...v.map(Math.abs));
   const bw = (W - 2 * P) / v.length, mid = H / 2;
   const bars = v.map((x, i) => { const h = (Math.abs(x) / mx) * (mid - P); return `<rect x="${(P + i * bw + bw * 0.15).toFixed(1)}" y="${(x >= 0 ? mid - h : mid).toFixed(1)}" width="${(bw * 0.7).toFixed(1)}" height="${Math.max(h, 0.8).toFixed(1)}" fill="${x >= 0 ? "var(--up)" : "var(--down)"}"><title>${esc(labels[i] || "")} ${fmt(x, 1)}</title></rect>`; }).join("");
-  return `<svg class="barchart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="每日買賣超"><line x1="0" x2="${W}" y1="${mid}" y2="${mid}" stroke="var(--line)"/>${bars}</svg>`;
+  return `<svg class="barchart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="每日買賣超"><line x1="0" x2="${W}" y1="${mid}" y2="${mid}" stroke="var(--ink)" stroke-width="2" vector-effect="non-scaling-stroke"/>${bars}</svg>`;
 }
 /** 加權指數走勢（含月線、季線） */
 function indexChart(s) {
@@ -403,11 +413,11 @@ function indexChart(s) {
   const col = c[n - 1] >= c[0] ? "var(--up)" : "var(--down)";
   return `<svg class="spark" style="height:150px" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="加權指數近 ${n} 日走勢">
     <path d="${path(c)} L${x(n - 1)},${H} L${x(0)},${H} Z" fill="${col}" opacity=".08"/>
-    <path d="${path(m60)}" fill="none" stroke="var(--accent)" stroke-width="1.4" vector-effect="non-scaling-stroke"/>
-    <path d="${path(m20)}" fill="none" stroke="var(--warn)" stroke-width="1.4" vector-effect="non-scaling-stroke"/>
+    <path d="${path(m60)}" fill="none" stroke="var(--sky)" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    <path d="${path(m20)}" fill="none" stroke="var(--ink)" stroke-width="2" vector-effect="non-scaling-stroke"/>
     <path d="${path(c)}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke"/>
     <circle cx="${x(n - 1)}" cy="${y(c[n - 1])}" r="3.5" fill="${col}"/></svg>
-    <div class="row sub" style="justify-content:space-between"><span>${md(s.d[0])}～${md(s.d[n - 1])}　最低 <span class="num">${fmt(Math.min(...c))}</span>　最高 <span class="num">${fmt(Math.max(...c))}</span></span><span><span style="color:var(--warn)">━</span> 月線　<span style="color:var(--accent)">━</span> 季線</span></div>`;
+    <div class="row sub" style="justify-content:space-between"><span>${md(s.d[0])}～${md(s.d[n - 1])}　最低 <span class="num">${fmt(Math.min(...c))}</span>　最高 <span class="num">${fmt(Math.max(...c))}</span></span><span><span style="color:var(--ink)">━</span> 月線　<span style="color:var(--sky)">━</span> 季線</span></div>`;
 }
 /** 族群個股表（記憶體、AI） */
 function stockTable(list) {
@@ -430,7 +440,7 @@ function peoplePanel(filterAi = false) {
   const items = (AUTO.news?.items || []).filter((n) => (n.people || []).length && (!filterAi || (n.cats || []).includes("ai")));
   const P = ["黃仁勳", "蘇姿丰", "馬斯克", "奧特曼", "川普", "Fed 主席"];
   const roles = { "黃仁勳": "輝達執行長", "蘇姿丰": "AMD 執行長", "馬斯克": "特斯拉、xAI", "奧特曼": "OpenAI 執行長", "川普": "美國總統", "Fed 主席": "聯準會" };
-  const body = P.map((p) => { const hit = items.filter((n) => n.people.includes(p)).slice(0, 2); return `<div class="who"><b>${esc(p)}<small>${esc(roles[p])}</small></b><div>${hit.length ? hit.map((n) => `<div><a href="${esc(safeUrl(n.u))}" target="_blank" rel="noopener noreferrer">${esc(n.t)}</a><small>${esc(n.src || "")}・${mdhm(n.time)}</small></div>`).join("") : `<span class="sub">近 3 天沒有相關新聞</span>`}</div></div>`; }).join("");
+  const body = P.map((p) => { const hit = items.filter((n) => n.people.includes(p)).slice(0, 2); return `<div class="who"><div class="av" aria-hidden="true"><span>${esc(p.slice(0, 1))}</span></div><div><b>${esc(p)}<small>${esc(roles[p])}</small></b>${hit.length ? hit.map((n) => `<div><a href="${esc(safeUrl(n.u))}" target="_blank" rel="noopener noreferrer">${esc(n.t)}</a><small>${esc(n.src || "")}・${mdhm(n.time)}</small></div>`).join("") : `<span class="sub">近 3 天沒有相關新聞</span>`}</div></div>`; }).join("");
   return `<div class="panel"><div class="sec-head"><h2>名人發言追蹤</h2><span class="sub">AI 與政策風向球</span></div><div class="people">${body}</div></div>`;
 }
 const instiRows = () => AUTO.market?.insti || [];
@@ -474,14 +484,14 @@ function rankTable(title, rows, unit = "張") {
 const sumLast = (arr, k, n) => arr.slice(-n).reduce((s, x) => s + (x[k] || 0), 0);
 
 const TREND_RENDER = {
-  tw: () => newsPanel("台灣重大新聞", newsOf("tw"), 25),
+  tw: () => newsPanel("台灣重大新聞", newsOf("tw"), 25, "", true),
   us: () => {
     const vix = usq("VIX");
     const vixNote = vix ? (vix.close > 30 ? "高度恐慌（> 30）" : vix.close > 20 ? "偏緊張（> 20）" : "平穩（< 20）") : "";
-    return preOpen() + `<div class="panel"><div class="sec-head"><h2>開盤前必看清單</h2><span class="sub">美股收盤、ADR、利率、匯率、油價</span></div>
+    return newsPanel("美國重大新聞", newsOf("us"), 13, "", true) + preOpen() + `<div class="panel"><div class="sec-head"><h2>開盤前必看清單</h2><span class="sub">美股收盤、ADR、利率、匯率、油價</span></div>
       <div class="minitick">${miniTick("道瓊", usq("DJI"))}${miniTick("標普 500", usq("GSPC"))}${miniTick("那斯達克", usq("IXIC"))}${miniTick("費城半導體", usq("SOX"))}${miniTick("台積電 ADR", usq("TSM"))}${miniTick("VIX 恐慌指數", vix, 2, vixNote)}${miniTick("10 年期美債殖利率", usq("TNX"), 3, "上升時壓抑科技股", "%")}${miniTick("美元指數", usq("DXY"))}${miniTick("美元兌新台幣", usq("TWD"), 3, "台幣升值利外資匯入")}${miniTick("WTI 原油", usq("WTI"))}${miniTick("布蘭特原油", usq("BRENT"))}</div></div>
       <div class="panel"><div class="sec-head"><h2>重要科技股</h2><span class="sub">財報與財測直接影響台灣半導體族群</span></div>${usStockTable(["NVDA", "AMD", "MU", "AVGO", "AAPL", "MSFT"])}</div>`
-      + peoplePanel() + newsPanel("美國重大新聞", newsOf("us"), 25) + usEconTable();
+      + peoplePanel() + usEconTable();
   },
   earn: () => {
     const t = tpeParts(), y = t.y;
@@ -537,6 +547,8 @@ async function ensureGroupHist() {
   renderTrend();
 }
 function renderTrend() {
+  { const t = tpeParts(); $("#mastDate").textContent = `${t.y} 年 ${t.m} 月 ${t.d} 日　星期${"日一二三四五六"[t.wd]}`;
+    const u = AUTO.news?.updatedAt || AUTO.status?.updatedAt; $("#mastStamp").textContent = u ? `${mdhm(u)} 更新` : "尚未取得自動資料"; }
   $("#trendTabs").innerHTML = TREND.map(([k, l]) => {
     const n = k === "us" || k === "market" || k === "insti" ? "" : newsOf(k).length;
     return `<button type="button" role="tab" data-trend="${k}" aria-selected="${trendTab === k}">${esc(l)}${n ? `<span class="n">${n}</span>` : ""}</button>`;
@@ -578,34 +590,50 @@ function spark(closes) {
   const maP = ma.map(([i, v], j) => `${j ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
   const last = c[c.length - 1], col = last >= c[0] ? "var(--up)" : "var(--down)";
   return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="近 ${c.length} 日收盤走勢">
-    <line x1="0" x2="${W}" y1="${H / 2}" y2="${H / 2}" stroke="var(--line)" stroke-dasharray="3 4" />
+    <line x1="0" x2="${W}" y1="${H / 2}" y2="${H / 2}" stroke="var(--soft)" stroke-dasharray="3 4" />
     <path d="${line} L${x(c.length - 1)},${H} L${x(0)},${H} Z" fill="${col}" opacity=".1"/>
-    ${maP ? `<path d="${maP}" fill="none" stroke="var(--warn)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>` : ""}
+    ${maP ? `<path d="${maP}" fill="none" stroke="var(--ink)" stroke-width="2" vector-effect="non-scaling-stroke"/>` : ""}
     <path d="${line}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke"/>
     <circle cx="${x(c.length - 1)}" cy="${y(last)}" r="3.5" fill="${col}"/></svg>
-    <div class="row sub" style="justify-content:space-between"><span>近 ${c.length} 日　最低 <span class="num">${fmt(mn, 2)}</span>　最高 <span class="num">${fmt(mx, 2)}</span></span><span><span style="color:var(--warn)">━</span> 月線 MA20</span></div>`;
+    <div class="row sub" style="justify-content:space-between"><span>近 ${c.length} 日　最低 <span class="num">${fmt(mn, 2)}</span>　最高 <span class="num">${fmt(mx, 2)}</span></span><span><span style="color:var(--ink)">━</span> 月線 MA20</span></div>`;
 }
 const reasonsHtml = (g) => `<ul class="reasons">${g.r.map((r) => `<li class="${r.v > 0 ? "p" : r.v < 0 ? "n" : ""}">${esc(r.txt)}</li>`).join("")}</ul>`;
 const grpScore = (g) => (!g.ok ? `<span class="chip">無資料</span>` : `<span class="chip ${g.s > 0.2 ? "bull" : g.s < -0.2 ? "bear" : ""}">${g.s > 0 ? "+" : ""}${g.s.toFixed(1)}</span>`);
 const sigLabel = (a) => (a.risk ? (a.risk.k === "bear" ? "觸及停損" : "達停利") : a.verdict.t.split("・")[0]);
 const sigClass = (a) => (a.risk ? "warn" : a.verdict.k);
 
+/** 綜合分數 -2～+2 → 10 格血條（中間為 0，偏空亮綠、偏多亮紅） */
+function meterHtml(score, cls = "") {
+  const n = Math.max(-5, Math.min(5, Math.round(score * 2.5)));
+  const cells = Array.from({ length: 10 }, (_, i) => {
+    const on = n < 0 ? i >= 5 + n && i < 5 : n > 0 ? i >= 5 && i < 5 + n : false;
+    const cur = n < 0 ? i === 5 + n : n > 0 ? i === 4 + n : false;
+    return `<i class="${on ? (n < 0 ? "b" : "u") : ""}${cur ? " cur" : ""}"></i>`;
+  }).join("");
+  return `<div class="meter ${cls}" role="img" aria-label="綜合分數 ${score.toFixed(2)}（-2 偏空到 +2 偏多）">${cells}</div>`;
+}
+/** 單一面向分數 -2～+2 → 8 格能力值條 */
+function statHtml(g) {
+  if (!g.ok) return `<div class="statbar" aria-hidden="true">${"<i></i>".repeat(8)}</div>`;
+  const v = Math.max(-2, Math.min(2, g.s)), k = Math.round(Math.abs(v) * 4);
+  return `<div class="statbar" role="img" aria-label="分數 ${v.toFixed(1)}">${Array.from({ length: 8 }, (_, i) => `<i class="${i < k ? (v < 0 ? "b" : "u") : ""}"></i>`).join("")}</div>`;
+}
 function renderWatch() {
   const d = AUTO.quotes?.date;
   $("#refNote").textContent = d ? `股價為 ${md(d)} 收盤（每個交易日 14:43 自動更新）。盤中想看即時價，可在個股裡填「盤中價」暫時覆蓋。` : "還沒有自動資料，目前顯示的是 11/4 收盤參考價。";
+  $("#partyCount").textContent = `PARTY・${S.watch.length}`;
   const el = $("#watch");
-  if (!S.watch.length) { el.innerHTML = `<div class="empty">觀察清單是空的，從下方加入第一檔股票。</div>`; return; }
+  if (!S.watch.length) { el.innerHTML = `<div class="empty"><span>觀察清單是空的，從下方加入第一檔股票。</span></div>`; return; }
   el.innerHTML = S.watch.map((st) => {
     const a = analyze(st), e = a.e;
     const pv = e.price != null && e.chg != null ? e.price - e.chg : null;
     const pct = pv ? (e.chg / pv) * 100 : null;
-    const pos = Math.round(((a.score + 2) / 4) * 100);
     const open = openCode === st.code;
-    return `<div class="stock">
+    return `<div class="stock${open ? " open" : ""}">
       <button class="head" type="button" data-toggle="${esc(st.code)}" aria-expanded="${open}">
         <div class="nm"><span>${esc(st.code)}</span><b>${esc(st.name)}</b>${a.pos ? ` <span class="chip info">持有 ${fmt(a.pos.qty)} 股</span>` : ""}</div>
         <div class="px"><b class="${cls(e.chg)}">${e.price != null ? fmt(e.price, e.price < 100 ? 2 : 1) : "—"}</b><small class="${cls(e.chg)}">${e.chg != null ? (e.chg > 0 ? "▲" : e.chg < 0 ? "▼" : "") + fmt(Math.abs(e.chg), 2) + "　" + fmtP(pct) : e.src.price === "manual" ? "參考價" : ""}</small></div>
-        <div class="sig"><span class="chip ${sigClass(a)}">${esc(sigLabel(a))}</span><div class="meter" title="綜合分數 ${a.score.toFixed(2)}"><i style="left:${pos}%"></i></div></div>
+        <div class="sig"><span class="chip ${sigClass(a)}">${esc(sigLabel(a))}</span>${meterHtml(a.score)}</div>
       </button>
       ${open ? detailHtml(st, a) : ""}
     </div>`;
@@ -619,18 +647,19 @@ function detailHtml(st, a) {
   const ph = (val, unit = "") => (val != null ? `placeholder="自動：${esc(fmt(val, Math.abs(val) < 100 && val % 1 ? 1 : 0))}${unit}"` : "");
   const histNote = e.src.closes === "auto" ? `自動收盤價 ${e.closes.length} 天（自 ${md(e.histFrom)}）` : e.src.closes === "manual" ? `手動收盤價 ${e.closes.length} 筆` : "沒有收盤價資料";
   return `<div class="detail">
-    <div class="verdict ${a.verdict.k}"><strong>${esc(a.verdict.t)}</strong><span class="sub" style="color:inherit">${esc(a.verdict.d)}</span>
-      <span class="sub">綜合分數 <b class="num">${a.score > 0 ? "+" : ""}${a.score.toFixed(2)}</b>（-2 偏空 ～ +2 偏多）</span></div>
+    <div class="scorebar"><div class="ends"><span>BEAR -2</span><span>SCORE ${a.score > 0 ? "+" : ""}${a.score.toFixed(2)}</span><span>BULL +2</span></div>${meterHtml(a.score)}</div>
+    <div class="dialog ${a.verdict.k}"><strong>▶ ${esc(a.verdict.t)}</strong><span style="font-size:13.5px">${esc(a.verdict.d)}</span></div>
     ${a.risk ? `<div class="notice">${esc(a.risk.t)}</div>` : ""}
     ${a.pos ? `<div class="notice info">持有 ${fmt(a.pos.qty)} 股，平均成本 <span class="num">${fmt(a.pos.avg, 2)}</span>，損益 <b class="num ${cls(a.posPct)}">${fmtP(a.posPct)}</b>。停損 -${esc(st.stop)}%／停利 +${esc(st.take)}%</div>` : ""}
-    <div>${spark(e.closes)}</div>
+    <div class="chart">${spark(e.closes)}</div>
+    <div class="actions"><button type="button" class="buy" data-trade="buy" data-code="${esc(st.code)}">買入</button><button type="button" class="sell" data-trade="sell" data-code="${esc(st.code)}">賣出</button></div>
     <div class="cols">
-      <div class="box"><div class="row" style="justify-content:space-between"><h3>技術面 <small class="sub">35%</small></h3>${grpScore(a.tech)}</div>${reasonsHtml(a.tech)}
+      <div class="box"><div class="row" style="justify-content:space-between"><h3>技術面 <small class="sub">35%</small></h3>${grpScore(a.tech)}</div>${statHtml(a.tech)}${reasonsHtml(a.tech)}
         <dl class="kv"><dt>MA5／20／60</dt><dd>${fmt(i.ma5, 1)}／${fmt(i.ma20, 1)}／${fmt(i.ma60, 1)}</dd><dt>K／D</dt><dd>${fmt(i.k, 1)}／${fmt(i.d, 1)}</dd><dt>MACD 柱</dt><dd>${fmt(i.hist, 2)}</dd>${i.vol != null ? `<dt>成交量／20日均</dt><dd>${fmt(i.vol)}／${fmt(i.vol20)} 張</dd>` : ""}</dl>
         <p class="sub" style="margin:0">${esc(histNote)}</p></div>
-      <div class="box"><div class="row" style="justify-content:space-between"><h3>籌碼面 <small class="sub">25%</small></h3>${grpScore(a.chip)}</div>${reasonsHtml(a.chip)}</div>
-      <div class="box"><div class="row" style="justify-content:space-between"><h3>基本面 <small class="sub">25%</small></h3>${grpScore(a.fund)}</div>${reasonsHtml(a.fund)}${e.revYm ? `<p class="sub" style="margin:0">月營收資料：${esc(e.revYm)}</p>` : ""}</div>
-      <div class="box"><div class="row" style="justify-content:space-between"><h3>消息面 <small class="sub">15%</small></h3>${grpScore(a.news)}</div>${reasonsHtml(a.news)}</div>
+      <div class="box"><div class="row" style="justify-content:space-between"><h3>籌碼面 <small class="sub">25%</small></h3>${grpScore(a.chip)}</div>${statHtml(a.chip)}${reasonsHtml(a.chip)}</div>
+      <div class="box"><div class="row" style="justify-content:space-between"><h3>基本面 <small class="sub">25%</small></h3>${grpScore(a.fund)}</div>${statHtml(a.fund)}${reasonsHtml(a.fund)}${e.revYm ? `<p class="sub" style="margin:0">月營收資料：${esc(e.revYm)}</p>` : ""}</div>
+      <div class="box"><div class="row" style="justify-content:space-between"><h3>消息面 <small class="sub">15%</small></h3>${grpScore(a.news)}</div>${statHtml(a.news)}${reasonsHtml(a.news)}</div>
     </div>
     <form class="form" data-edit="${esc(st.code)}">
       <label>盤中價（選填，蓋過收盤價）<input name="livePrice" type="number" step="0.01" min="0" value="${v(st.livePrice)}" placeholder="留空用收盤價"></label>
@@ -722,36 +751,40 @@ function renderAccount() {
   $("#acctBar").innerHTML = S.accounts.map((a) => `<button type="button" aria-pressed="${a.id === curAcct}" data-acct="${esc(a.id)}">${esc(a.name)}</button>`).join("") + (S.accounts.length > 1 ? `<button type="button" aria-pressed="${all}" data-acct="__all">全部帳戶</button>` : "");
   const L = ledgerOf(S, all ? null : curAcct, priceOf);
   const cost = L.holdings.reduce((s, h) => s + h.cost, 0), mv = L.holdings.reduce((s, h) => s + (h.mv ?? h.cost), 0), un = mv - cost;
+  const COIN = `<svg width="44" height="44" viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true"><rect x="2" y="0" width="4" height="1" fill="#2A2019"/><rect x="1" y="1" width="6" height="6" fill="#A8473A"/><rect x="0" y="2" width="1" height="4" fill="#2A2019"/><rect x="7" y="2" width="1" height="4" fill="#2A2019"/><rect x="1" y="1" width="1" height="1" fill="#2A2019"/><rect x="6" y="1" width="1" height="1" fill="#2A2019"/><rect x="1" y="6" width="1" height="1" fill="#2A2019"/><rect x="6" y="6" width="1" height="1" fill="#2A2019"/><rect x="2" y="7" width="4" height="1" fill="#2A2019"/><rect x="3" y="2" width="2" height="4" fill="#2A2019"/><rect x="2" y="2" width="1" height="1" fill="#ECE7DC"/></svg>`;
+  const arrow = (n) => (n > 0 ? "▲" : n < 0 ? "▼" : "");
   $("#acctStats").innerHTML = `
-    <div class="stat lead"><span>總資產（現金＋市值）</span><b>${fmt(L.cash + mv)}</b></div>
+    <div class="stat lead">${COIN}<div><span>總資產（現金＋市值）</span><b>${fmt(L.cash + mv)}</b></div></div>
     <div class="stat"><span>可用現金</span><b>${fmt(L.cash)}</b></div>
     <div class="stat"><span>持股成本</span><b>${fmt(cost)}</b></div>
     <div class="stat"><span>持股市值</span><b>${fmt(mv)}</b></div>
-    <div class="stat"><span>未實現損益</span><b class="${cls(un)}">${un > 0 ? "+" : ""}${fmt(un)}</b></div>
-    <div class="stat"><span>已實現損益</span><b class="${cls(L.realized)}">${L.realized > 0 ? "+" : ""}${fmt(L.realized)}</b></div>`;
-  $("#holdings").innerHTML = L.holdings.length ? `<div class="tbl"><table><thead><tr><th>股票</th><th class="r">股數</th><th class="r">均價</th><th class="r">現價</th><th class="r">市值</th><th class="r">損益</th><th>訊號</th></tr></thead><tbody>${
-    L.holdings.map((h) => {
+    <div class="stat"><span>未實現損益</span><b class="${cls(un)}">${arrow(un)}${fmt(Math.abs(un))}</b></div>
+    <div class="stat"><span>已實現損益</span><b class="${cls(L.realized)}">${arrow(L.realized)}${fmt(Math.abs(L.realized))}</b></div>`;
+  const slots = Math.max(0, (L.holdings.length % 2 ? 1 : 0) + (L.holdings.length < 4 ? 2 : 0));
+  $("#holdings").innerHTML = L.holdings.length ? `<div class="inv">${L.holdings.map((h) => {
       const pl = h.mv != null ? h.mv - h.cost : null, pp = pl != null ? (pl / h.cost) * 100 : null;
       const w = S.watch.find((x) => x.code === h.code), a = w ? analyze(w) : null;
-      return `<tr><td><span class="num sub">${esc(h.code)}</span> ${esc(h.name || "")}</td><td class="r num">${fmt(h.qty)}</td><td class="r num">${fmt(h.avg, 2)}</td><td class="r num">${h.px != null ? fmt(h.px, 2) : "—"}</td><td class="r num">${h.mv != null ? fmt(h.mv) : "—"}</td>
-      <td class="r num ${cls(pl)}">${pl != null ? (pl > 0 ? "+" : "") + fmt(pl) + "<br><small>" + fmtP(pp) + "</small>" : "—"}</td><td>${a ? `<span class="chip ${sigClass(a)}">${esc(sigLabel(a))}</span>` : `<span class="sub">未在觀察清單</span>`}</td></tr>`;
-    }).join("")}</tbody></table></div>`
-    : `<div class="empty">目前沒有持股。先在右側「資金存入」，再用「下單紀錄」記下買入。</div>`;
+      return `<div class="item"><div class="top">${esc(h.name || h.code)}<span>${esc(h.code)}</span></div>
+        <span class="qty">× ${fmt(h.qty)} 股</span>
+        <span class="sub">均價 <span class="num">${fmt(h.avg, 2)}</span>・現價 <span class="num">${h.px != null ? fmt(h.px, 2) : "—"}</span></span>
+        <span class="pl ${cls(pl)}">${pl != null ? arrow(pl) + fmt(Math.abs(pl)) + "<br>" + fmtP(pp) : "—"}</span>
+        ${a ? `<span><span class="chip ${sigClass(a)}">${esc(sigLabel(a))}</span></span>` : `<span class="sub">未在觀察清單</span>`}</div>`;
+    }).join("")}${'<div class="item slot" aria-hidden="true"></div>'.repeat(slots)}</div>`
+    : `<div class="empty"><span>道具欄是空的。先在「資金存入」放入資金，再用「下單紀錄」記下第一筆買入。</span></div>`;
   const rows = [...S.trades.filter((t) => all || t.acct === curAcct).map((t) => ({ ...t, k: "t" })), ...S.cash.filter((c) => all || c.acct === curAcct).map((c) => ({ ...c, k: "c" }))].sort((a, b) => b.time.localeCompare(a.time));
-  $("#histCount").textContent = rows.length ? `共 ${rows.length} 筆` : "";
+  $("#histCount").textContent = rows.length ? `QUEST LOG・${rows.length} 筆` : "QUEST LOG";
   const an = (id) => S.accounts.find((a) => a.id === id)?.name || "";
-  $("#history").innerHTML = rows.length ? `<div class="tbl"><table><thead><tr><th>時間</th><th>類型</th><th>內容</th><th class="r">金額</th><th class="r">已實現</th><th></th></tr></thead><tbody>${rows.map((r) => {
-      const tm = esc(r.time.replace("T", " "));
-      if (r.k === "c") return `<tr><td class="num">${tm}</td><td><span class="chip info">${r.type === "deposit" ? "存入" : "提出"}</span></td><td class="sub">${all ? esc(an(r.acct)) : ""}</td><td class="r num">${r.type === "deposit" ? "+" : "-"}${fmt(r.amt)}</td><td></td><td><span class="confirm" data-del="cash:${esc(r.id)}"><button type="button" class="ghost" data-delask>刪除</button></span></td></tr>`;
+  const when = (t) => { const [d, h] = t.split("T"); return `${md(d)} ${h || ""}`; };
+  $("#history").innerHTML = rows.length ? `<ol class="log">${rows.map((r) => {
+      if (r.k === "c") return `<li><span class="kind">${r.type === "deposit" ? "存入" : "提出"}</span><span class="what">${r.type === "deposit" ? "資金存入" : "資金提出"}<small>${esc(when(r.time))}${all ? "・" + esc(an(r.acct)) : ""}</small></span>
+        <span class="amt">${r.type === "deposit" ? "+" : "-"}${fmt(r.amt)}<small><span class="confirm" data-del="cash:${esc(r.id)}"><button type="button" class="ghost" data-delask>刪除</button></span></small></span></li>`;
       const amt = r.qty * r.price, net = r.side === "buy" ? -(amt + (+r.fee || 0)) : amt - (+r.fee || 0) - (+r.tax || 0);
       const pl = L.plById[r.id];
-      return `<tr><td class="num">${tm}</td><td><span class="chip ${r.side === "buy" ? "bull" : "bear"}">${r.side === "buy" ? "買入" : "賣出"}</span></td>
-        <td class="wrapcell">${esc(r.code)} ${esc(r.name || "")}　<span class="num">${fmt(r.qty)} 股 × ${fmt(r.price, 2)}</span>${all ? ` <span class="sub">・${esc(an(r.acct))}</span>` : ""}${r.note ? `<br><small class="sub">${esc(r.note)}</small>` : ""}</td>
-        <td class="r num">${net > 0 ? "+" : ""}${fmt(net)}<br><small class="sub">費 ${fmt(r.fee)}${r.side === "sell" ? "／稅 " + fmt(r.tax) : ""}</small></td>
-        <td class="r num ${cls(pl)}">${r.side === "sell" && pl != null ? (pl > 0 ? "+" : "") + fmt(pl) : ""}</td>
-        <td><span class="confirm" data-del="trades:${esc(r.id)}"><button type="button" class="ghost" data-delask>刪除</button></span></td></tr>`;
-    }).join("")}</tbody></table></div>`
-    : `<div class="empty">還沒有任何紀錄。<br><button type="button" id="demoBtn" style="margin-top:8px">載入示範資料看看</button></div>`;
+      return `<li><span class="kind ${r.side}">${r.side === "buy" ? "買入" : "賣出"}</span>
+        <span class="what">${esc(r.name || r.code)} ${fmt(r.qty)} 股 × ${fmt(r.price, 2)}<small>${esc(when(r.time))}${all ? "・" + esc(an(r.acct)) : ""}・費 ${fmt(r.fee)}${r.side === "sell" ? "／稅 " + fmt(r.tax) : ""}</small>${r.note ? `<em>${esc(r.note)}</em>` : ""}</span>
+        <span class="amt ${r.side === "sell" && pl != null ? cls(pl) : ""}">${r.side === "sell" && pl != null ? arrow(pl) + fmt(Math.abs(pl)) : (net > 0 ? "+" : "") + fmt(net)}<small>${r.side === "sell" && pl != null ? "已實現・" : ""}<span class="confirm" data-del="trades:${esc(r.id)}"><button type="button" class="ghost" data-delask>刪除</button></span></small></span></li>`;
+    }).join("")}</ol>`
+    : `<div class="empty"><span>還沒有任何紀錄。</span><br><button type="button" id="demoBtn" style="margin-top:10px">載入示範資料看看</button></div>`;
   const keepAcct = $("#tAcct").value;
   $("#tAcct").innerHTML = S.accounts.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("");
   $("#tAcct").value = all ? (S.accounts.some((a) => a.id === keepAcct) ? keepAcct : S.accounts[0].id) : curAcct;
@@ -825,6 +858,18 @@ document.addEventListener("click", (e) => {
   if (ds.trend) { trendTab = ds.trend; lsSet("st.trend", trendTab); renderTrend(); return; }
   if (ds.addwatch) { if (!S.watch.some((w) => w.code === ds.addwatch)) { S.watch.push(newStock(ds.addwatch, ds.name || ds.addwatch)); commit(); renderWatch(); renderTrend(); } return; }
   if (ds.acct) { curAcct = ds.acct; renderAccount(); return; }
+  if (ds.trade) {
+    const w = S.watch.find((x) => x.code === ds.code);
+    side = ds.trade;
+    $("#sideB").setAttribute("aria-pressed", side === "buy"); $("#sideS").setAttribute("aria-pressed", side === "sell");
+    delete $("#tTax").dataset.touched; delete $("#tFee").dataset.touched;
+    $("#tCode").value = ds.code; $("#tName").value = w?.name || "";
+    const px = priceOf(ds.code); $("#tPrice").value = px ?? "";
+    if (side === "sell") { const h = ledgerOf(S, $("#tAcct").value || null, priceOf).holdings.find((x) => x.code === ds.code); $("#tQty").value = h ? h.qty : ""; }
+    location.hash = "account"; tradePreview();
+    setTimeout(() => { $("#tradeForm").scrollIntoView({ behavior: "smooth", block: "center" }); $("#tQty").focus({ preventScroll: true }); }, 60);
+    return;
+  }
   if (ds.sync === "signin") { signIn(); return; }
   if (ds.sync === "now") { syncNow(); return; }
   if (ds.sync === "signout") { Sync.signOut(); setSync(initialSyncState()); return; }
@@ -1003,6 +1048,45 @@ document.addEventListener("visibilitychange", () => {
   if (Sync.hasToken()) syncNow(); else if (Sync.wasSignedIn()) setSync("needTap");
   if (Date.now() - AUTO.loadedAt > 15 * 60000) loadAuto();
 });
+
+
+/* ---------- 啟動畫面 ---------- */
+const splashEl = $("#splash");
+let splashDone = 0, splashTotal = 6, splashTimer = null;
+function splashProgress(done) {
+  if (!splashEl || splashEl.hidden) return;
+  splashDone = Math.min(splashTotal, done);
+  const pct = Math.round((splashDone / splashTotal) * 100), on = Math.round(pct / 100 * 12);
+  $("#splashBar").innerHTML = Array.from({ length: 12 }, (_, i) => `<i class="${i < on - 1 ? "on" : i === on - 1 ? "edge" : ""}"></i>`).join("");
+  $("#splashBar").setAttribute("aria-valuenow", pct);
+  $("#splashPct").textContent = pct + "%";
+  if (pct >= 100) {
+    const needTap = Sync.clientId() && Sync.wasSignedIn() && !Sync.hasToken();
+    $("#splashMsg").textContent = needTap ? "資料已更新。按「開始」同時同步你的帳戶紀錄。" : "資料已更新";
+    if (!needTap) splashTimer = setTimeout(closeSplash, 700);
+  }
+}
+function closeSplash() {
+  if (!splashEl || splashEl.hidden) return;
+  clearTimeout(splashTimer);
+  try { sessionStorage.setItem("st.splash", "1"); } catch {}
+  splashEl.classList.add("leave");
+  setTimeout(() => { splashEl.hidden = true; }, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 360);
+}
+let splashSeen = false;
+try { splashSeen = sessionStorage.getItem("st.splash") === "1"; } catch {}
+if (splashEl) {
+  if (splashSeen) splashEl.hidden = true;
+  else {
+    splashProgress(0);
+    $("#splashStart").addEventListener("click", () => {
+      // 這一下同時當作 Google 登入需要的點擊，不必再另外按「同步」
+      if (Sync.clientId() && Sync.wasSignedIn() && !Sync.hasToken()) signIn();
+      closeSplash();
+    });
+    setTimeout(() => splashProgress(splashTotal), 8000); // 網路很慢時也不要卡住
+  }
+}
 
 /* ---------- 啟動 ---------- */
 window.addEventListener("hashchange", route);

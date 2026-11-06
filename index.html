@@ -5,26 +5,68 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; connect-src 'self' https://www.googleapis.com https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com; base-uri 'none'; form-action 'none'; object-src 'none'">
 <meta name="referrer" content="no-referrer">
-<meta name="theme-color" content="#1d58a8">
+<meta name="theme-color" content="#2A2019">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="股票追蹤器">
 <title>股票追蹤器</title>
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@700;900&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Silkscreen:wght@400;700&family=VT323&family=Noto+Sans+TC:wght@400;700&display=swap">
 <link rel="stylesheet" href="style.css?v=dev">
 <script src="config.js?v=dev"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script type="module" src="app.js?v=dev"></script>
 </head>
 <body>
+<div class="splash" id="splash" role="dialog" aria-label="股票追蹤器">
+  <svg class="scene" viewBox="0 0 96 128" preserveAspectRatio="xMidYMax slice" shape-rendering="crispEdges" role="img" aria-label="像素街景：電線桿與電線橫過天空，路邊有紅綠兩色街屋和一座報攤">
+    <defs>
+      <pattern id="sDots" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="2" height="2" fill="#D6CFC0"/><rect width="1" height="1" fill="#5E4F40"/></pattern>
+      <pattern id="sChkR" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="2" height="2" fill="#A8473A"/><rect width="1" height="1" fill="#2A2019"/><rect x="1" y="1" width="1" height="1" fill="#2A2019"/></pattern>
+      <pattern id="sSky" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="2" height="2" fill="#6F8EA1"/><rect width="1" height="1" fill="#D6CFC0"/></pattern>
+      <pattern id="sHz" width="1" height="3" patternUnits="userSpaceOnUse"><rect width="1" height="3" fill="#ECE7DC"/><rect width="1" height="1" fill="#2A2019"/></pattern>
+    </defs>
+    <rect width="96" height="128" fill="#6F8EA1"/><rect y="54" width="96" height="6" fill="url(#sSky)"/>
+    <rect x="52" y="14" width="22" height="4" fill="#ECE7DC"/><rect x="48" y="16" width="30" height="3" fill="#ECE7DC"/><rect x="56" y="12" width="10" height="2" fill="#ECE7DC"/><rect x="8" y="28" width="14" height="3" fill="#ECE7DC"/><rect x="5" y="30" width="22" height="2" fill="#ECE7DC"/>
+    <rect y="52" width="26" height="76" fill="#A8473A"/><rect y="50" width="28" height="3" fill="#2A2019"/>
+    <rect x="3" y="57" width="6" height="6" fill="#ECE7DC"/><rect x="12" y="57" width="6" height="6" fill="#ECE7DC"/><rect x="4" y="58" width="1" height="4" fill="#2A2019"/><rect x="13" y="58" width="1" height="4" fill="#2A2019"/><rect x="3" y="68" width="6" height="6" fill="#2A2019"/><rect x="12" y="68" width="6" height="6" fill="#ECE7DC"/><rect x="3" y="79" width="6" height="6" fill="#ECE7DC"/><rect x="12" y="79" width="6" height="6" fill="#2A2019"/>
+    <rect x="20" y="56" width="4" height="30" fill="#ECE7DC"/><rect x="21" y="58" width="2" height="2" fill="#A8473A"/><rect x="21" y="62" width="2" height="2" fill="#A8473A"/><rect x="21" y="66" width="2" height="2" fill="#A8473A"/><rect x="21" y="70" width="2" height="2" fill="#A8473A"/>
+    <rect x="26" y="52" width="3" height="76" fill="url(#sChkR)"/><rect y="90" width="26" height="4" fill="#2A2019"/><rect y="94" width="26" height="20" fill="url(#sChkR)"/>
+    <rect x="66" y="44" width="30" height="84" fill="#ECE7DC"/><rect x="64" y="42" width="32" height="3" fill="#2A2019"/><rect x="68" y="47" width="26" height="12" fill="url(#sHz)"/>
+    <rect x="70" y="62" width="10" height="8" fill="#2A2019"/><rect x="71" y="63" width="8" height="6" fill="#6F8EA1"/><rect x="74" y="63" width="1" height="6" fill="#2A2019"/><rect x="84" y="62" width="9" height="8" fill="#4F8C74"/><rect x="84" y="62" width="9" height="1" fill="#2A2019"/>
+    <rect x="66" y="74" width="30" height="4" fill="#2A2019"/><rect x="66" y="78" width="30" height="5" fill="#4F8C74"/><rect x="70" y="86" width="22" height="28" fill="#2A2019"/><rect x="72" y="88" width="8" height="12" fill="#6F8EA1"/><rect x="82" y="88" width="8" height="12" fill="#6F8EA1"/>
+    <rect x="40" y="6" width="3" height="110" fill="#2A2019"/><rect x="34" y="12" width="15" height="2" fill="#2A2019"/><rect x="35" y="18" width="13" height="2" fill="#2A2019"/><rect x="37" y="24" width="9" height="3" fill="#5E4F40"/><rect x="58" y="22" width="2" height="94" fill="#2A2019"/><rect x="54" y="26" width="10" height="1" fill="#2A2019"/>
+    <rect y="9" width="34" height="1" fill="#2A2019"/><rect y="15" width="34" height="1" fill="#2A2019"/><rect x="49" y="13" width="10" height="1" fill="#2A2019"/><rect x="59" y="14" width="10" height="1" fill="#2A2019"/><rect x="69" y="15" width="27" height="1" fill="#2A2019"/><rect x="48" y="19" width="10" height="1" fill="#2A2019"/><rect x="58" y="21" width="14" height="1" fill="#2A2019"/><rect x="72" y="22" width="24" height="1" fill="#2A2019"/><rect x="43" y="30" width="12" height="1" fill="#2A2019"/><rect x="55" y="31" width="5" height="1" fill="#2A2019"/><rect x="60" y="33" width="36" height="1" fill="#2A2019"/>
+    <rect x="30" y="94" width="24" height="3" fill="#2A2019"/><rect x="31" y="97" width="22" height="4" fill="#A8473A"/><rect x="31" y="97" width="2" height="4" fill="#ECE7DC"/><rect x="35" y="97" width="2" height="4" fill="#ECE7DC"/><rect x="39" y="97" width="2" height="4" fill="#ECE7DC"/><rect x="43" y="97" width="2" height="4" fill="#ECE7DC"/><rect x="47" y="97" width="2" height="4" fill="#ECE7DC"/><rect x="51" y="97" width="2" height="4" fill="#ECE7DC"/>
+    <rect x="32" y="101" width="20" height="13" fill="#ECE7DC"/><rect x="34" y="103" width="7" height="5" fill="#2A2019"/><rect x="35" y="104" width="5" height="1" fill="#ECE7DC"/><rect x="35" y="106" width="3" height="1" fill="#A8473A"/><rect x="43" y="103" width="7" height="5" fill="#2A2019"/><rect x="44" y="104" width="5" height="1" fill="#ECE7DC"/><rect x="44" y="106" width="3" height="1" fill="#4F8C74"/><rect x="34" y="110" width="16" height="1" fill="#5E4F40"/>
+    <rect y="114" width="96" height="2" fill="#2A2019"/><rect y="116" width="96" height="12" fill="url(#sDots)"/><rect x="60" y="120" width="30" height="8" fill="#2A2019"/><rect x="12" y="121" width="10" height="2" fill="#2A2019"/>
+  </svg>
+  <div class="body">
+    <h1>股票追蹤器</h1>
+    <div class="en">STOCK TRACKER</div>
+    <div class="tag">讀新聞・看籌碼・抓買賣點</div>
+    <div class="load">
+      <div class="ends"><span>LOADING DATA</span><span id="splashPct">0%</span></div>
+      <div class="meter" id="splashBar" role="progressbar" aria-label="載入進度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+      <div class="msg" id="splashMsg">正在讀取收盤價、三大法人與今日新聞</div>
+    </div>
+    <button type="button" class="primary start" id="splashStart">▶ 開始</button>
+    <div class="foot"><span>VER 1.1</span><span>DATA: TWSE・TPEX</span></div>
+  </div>
+</div>
 <header class="top">
   <div class="wrap">
-    <div class="brand"><h1>股票追蹤器</h1><span class="clock num" id="clock">—</span></div>
+    <div class="brand"><svg width="22" height="22" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="16" height="16" fill="#2A2019"/><rect x="1" y="1" width="14" height="11" fill="#ECE7DC"/><rect x="2" y="2" width="12" height="9" fill="#D6CFC0"/><rect x="4" y="5" width="1" height="6" fill="#2A2019"/><rect x="3" y="6" width="3" height="3" fill="#4F8C74"/><rect x="8" y="4" width="1" height="6" fill="#2A2019"/><rect x="7" y="5" width="3" height="3" fill="#A8473A"/><rect x="12" y="2" width="1" height="6" fill="#2A2019"/><rect x="11" y="3" width="3" height="3" fill="#A8473A"/><rect x="3" y="13" width="3" height="1" fill="#A8473A"/><rect x="7" y="13" width="2" height="1" fill="#4F8C74"/></svg><h1>股票追蹤器</h1><span class="clock" id="clock">—</span></div>
     <span class="phase" id="phase"><i></i><span>—</span></span>
     <button class="syncpill" id="syncPill" type="button">雲端同步</button>
     <nav class="tabs" aria-label="功能">
-      <a href="#news" data-v="news">資訊趨勢</a>
-      <a href="#track" data-v="track">股票追蹤</a>
-      <a href="#account" data-v="account">我的帳號</a>
-      <a href="#guide" data-v="guide">分析要點</a>
+      <a href="#news" data-v="news"><svg width="26" height="15" viewBox="0 0 24 13" shape-rendering="crispEdges" aria-hidden="true"><rect x="0" y="2" width="4" height="10" fill="#5E4F40"/><rect x="1" y="3" width="2" height="8" fill="#2A2019"/><rect x="4" y="1" width="20" height="11" fill="#ECE7DC"/><rect x="4" y="12" width="20" height="1" fill="#2A2019"/><rect x="23" y="1" width="1" height="11" fill="#5E4F40"/><rect x="10" y="2" width="8" height="2" fill="#2A2019"/><rect x="6" y="5" width="7" height="4" fill="#A8473A"/><rect x="15" y="5" width="7" height="1" fill="#5E4F40"/><rect x="15" y="7" width="7" height="1" fill="#5E4F40"/><rect x="6" y="10" width="16" height="1" fill="#5E4F40"/></svg><span>資訊趨勢</span></a>
+      <a href="#track" data-v="track"><svg width="16" height="16" viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true"><rect x="0" y="7" width="8" height="1" fill="currentColor"/><rect x="1" y="4" width="1" height="3" fill="#4F8C74"/><rect x="3" y="2" width="1" height="5" fill="#A8473A"/><rect x="5" y="3" width="1" height="4" fill="#4F8C74"/><rect x="7" y="0" width="1" height="7" fill="#A8473A"/></svg><span>股票追蹤</span></a>
+      <a href="#account" data-v="account"><svg width="16" height="16" viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true"><rect x="2" y="0" width="4" height="1" fill="currentColor"/><rect x="1" y="1" width="6" height="6" fill="#A8473A"/><rect x="0" y="2" width="1" height="4" fill="currentColor"/><rect x="7" y="2" width="1" height="4" fill="currentColor"/><rect x="2" y="7" width="4" height="1" fill="currentColor"/><rect x="3" y="2" width="2" height="4" fill="#2A2019"/></svg><span>我的帳號</span></a>
+      <a href="#guide" data-v="guide"><svg width="16" height="16" viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true"><rect x="1" y="0" width="6" height="8" fill="currentColor"/><rect x="2" y="1" width="4" height="6" fill="#ECE7DC"/><rect x="2" y="2" width="4" height="1" fill="#6F8EA1"/><rect x="2" y="4" width="3" height="1" fill="#2A2019"/></svg><span>分析要點</span></a>
     </nav>
   </div>
 </header>
@@ -32,13 +74,35 @@
 <main class="wrap">
   <!-- 資訊趨勢 -->
   <section class="view" id="v-news">
-    <div class="tape" id="tape"></div>
+    <div class="masthead">
+      <svg class="scene" viewBox="0 0 96 40" preserveAspectRatio="xMidYMid slice" shape-rendering="crispEdges" role="img" aria-label="像素街景：電線桿、電線與房屋">
+        <defs>
+          <pattern id="mDots" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="2" height="2" fill="#D6CFC0"/><rect width="1" height="1" fill="#2A2019"/></pattern>
+          <pattern id="mChk" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="2" height="2" fill="#A8473A"/><rect width="1" height="1" fill="#2A2019"/><rect x="1" y="1" width="1" height="1" fill="#2A2019"/></pattern>
+          <pattern id="mSky" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="2" height="2" fill="#6F8EA1"/><rect width="1" height="1" fill="#D6CFC0"/></pattern>
+        </defs>
+        <rect width="96" height="40" fill="#6F8EA1"/><rect y="16" width="96" height="3" fill="url(#mSky)"/>
+        <rect x="58" y="4" width="14" height="3" fill="#ECE7DC"/><rect x="55" y="5" width="20" height="2" fill="#ECE7DC"/><rect x="12" y="8" width="10" height="2" fill="#ECE7DC"/><rect x="10" y="9" width="16" height="2" fill="#ECE7DC"/>
+        <rect y="12" width="22" height="28" fill="#A8473A"/><rect x="2" y="15" width="4" height="4" fill="#ECE7DC"/><rect x="8" y="15" width="4" height="4" fill="#ECE7DC"/><rect x="14" y="15" width="4" height="4" fill="#ECE7DC"/><rect x="2" y="22" width="4" height="4" fill="#2A2019"/><rect x="8" y="22" width="4" height="4" fill="#ECE7DC"/><rect x="14" y="22" width="4" height="4" fill="#2A2019"/><rect y="12" width="22" height="1" fill="#2A2019"/><rect x="22" y="12" width="2" height="28" fill="url(#mChk)"/>
+        <rect x="66" y="14" width="30" height="26" fill="#ECE7DC"/><rect x="64" y="12" width="34" height="2" fill="#2A2019"/><rect x="68" y="16" width="26" height="1" fill="#2A2019"/><rect x="68" y="18" width="26" height="1" fill="#2A2019"/><rect x="68" y="20" width="26" height="1" fill="#2A2019"/>
+        <rect x="70" y="24" width="8" height="6" fill="#2A2019"/><rect x="71" y="25" width="6" height="4" fill="#6F8EA1"/><rect x="82" y="24" width="10" height="8" fill="#4F8C74"/><rect x="82" y="24" width="10" height="1" fill="#2A2019"/>
+        <rect x="40" y="2" width="2" height="38" fill="#2A2019"/><rect x="36" y="5" width="10" height="1" fill="#2A2019"/><rect x="37" y="8" width="8" height="1" fill="#2A2019"/><rect x="30" y="7" width="2" height="33" fill="#2A2019"/>
+        <rect y="3" width="40" height="1" fill="#2A2019"/><rect x="42" y="4" width="54" height="1" fill="#2A2019"/><rect y="6" width="36" height="1" fill="#2A2019"/><rect x="46" y="7" width="50" height="1" fill="#2A2019"/><rect x="42" y="9" width="24" height="1" fill="#2A2019"/><rect x="66" y="10" width="30" height="1" fill="#2A2019"/>
+        <rect x="24" y="33" width="42" height="7" fill="url(#mDots)"/><rect x="24" y="32" width="42" height="1" fill="#2A2019"/><rect x="44" y="36" width="8" height="2" fill="#2A2019"/>
+      </svg>
+      <div class="rule"></div>
+      <div class="title"><svg width="54" height="30" viewBox="0 0 24 13" shape-rendering="crispEdges" aria-hidden="true"><rect x="0" y="2" width="4" height="10" fill="#5E4F40"/><rect x="1" y="3" width="2" height="8" fill="#2A2019"/><rect x="4" y="1" width="20" height="11" fill="#ECE7DC"/><rect x="4" y="12" width="20" height="1" fill="#2A2019"/><rect x="23" y="1" width="1" height="11" fill="#5E4F40"/><rect x="10" y="2" width="8" height="2" fill="#2A2019"/><rect x="6" y="5" width="7" height="4" fill="#A8473A"/><rect x="15" y="5" width="7" height="1" fill="#5E4F40"/><rect x="15" y="7" width="7" height="1" fill="#5E4F40"/><rect x="6" y="10" width="16" height="1" fill="#5E4F40"/></svg><h1>資訊趨勢</h1></div>
+      <div class="en">THE PIXEL MARKET TIMES</div>
+      <div class="dateline"><span id="mastDate">—</span><span id="mastStamp">—</span></div>
+    </div>
     <nav class="subtabs" id="trendTabs" aria-label="資訊分類"></nav>
+    <div class="tape" id="tape"></div>
     <div class="desk">
       <div class="view">
         <div class="view" id="trendMain"></div>
         <div class="panel">
-          <div class="sec-head"><h2>我的新聞筆記</h2><span class="sub">標註相關代號後，會一起納入消息面判斷</span></div>
+          <div class="sec-head"><h2>我的新聞筆記</h2><span class="label">NOTES</span></div>
+          <p class="sub" style="margin:0">標註相關代號後，會一起納入消息面判斷。</p>
           <form class="form" id="noteForm">
             <label class="full">標題<input id="noteTitle" required maxlength="120" placeholder="例：台積電法說會上調全年營收指引"></label>
             <label>影響<select id="noteImpact"><option value="1">利多</option><option value="0" selected>中性</option><option value="-1">利空</option></select></label>
@@ -68,11 +132,12 @@
 
   <!-- 股票追蹤 -->
   <section class="view" id="v-track" hidden>
-    <div class="sec-head"><h2>股票追蹤</h2><span class="sub">點開個股看四面向判斷；標「自動」的數據每天由公開資料更新</span></div>
+    <div class="sec-head"><h2>股票追蹤</h2><span class="label" id="partyCount">PARTY</span></div>
+    <p class="sub" style="margin:0">點開角色卡看四面向判斷；標「自動」的數據每天由公開資料更新。</p>
     <div class="notice info" id="refNote"></div>
     <div class="wl" id="watch"></div>
-    <div class="panel">
-      <h3>加入觀察</h3>
+    <div class="recruit">
+      <h3>＋ 招募新成員・加入觀察</h3>
       <form class="form" id="addStock">
         <label>股票代號<input id="asCode" required maxlength="6" placeholder="2330 或 00679B" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="done"></label>
         <label>名稱<input id="asName" required maxlength="20" placeholder="輸入代號會自動帶入"></label>
@@ -91,11 +156,12 @@
     <div class="desk">
       <div class="view">
         <div class="panel">
-          <div class="sec-head"><h3>目前持股</h3><span class="sub">平均成本含手續費；市值用最新收盤價</span></div>
+          <div class="sec-head"><h2>持股道具欄</h2><span class="label">INVENTORY</span></div>
+          <p class="sub" style="margin:0">平均成本含手續費；市值用最新收盤價。</p>
           <div id="holdings"></div>
         </div>
         <div class="panel">
-          <div class="sec-head"><h3>交易與資金紀錄</h3><span class="sub" id="histCount"></span></div>
+          <div class="sec-head"><h2>交易日誌</h2><span class="label" id="histCount"></span></div>
           <div id="history"></div>
         </div>
       </div>
