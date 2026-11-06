@@ -21,7 +21,7 @@ const fail = (k, e) => { status[k] = { ok: false, at: new Date().toISOString(), 
 
 function tpeNow() {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: TPE, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, weekday: "short" }).formatToParts(new Date()).map((x) => [x.type, x.value]));
-  return { date: `${p.year}-${p.month}-${p.day}`, hour: +p.hour % 24, wd: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.weekday) };
+  return { date: `${p.year}-${p.month}-${p.day}`, hour: +p.hour % 24, minute: +p.minute, wd: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.weekday) };
 }
 const ymd = (iso) => iso.replace(/-/g, "");
 const slashDate = (iso) => iso.replace(/-/g, "/");
@@ -136,7 +136,7 @@ async function main() {
   const now = tpeNow();
   log("台灣時間", now.date, now.hour + " 點", "SITE_URL=", SITE || "(未設定)");
 
-  const [pStore, pMarket, pQuotes, pRevenue, pNews, pStatus] = await Promise.all(["store.json", "market.json", "quotes.json", "revenue.json", "news.json", "status.json"].map(prev));
+  const [pStore, pMarket, pQuotes, pRevenue, pNews, pStatus, pIntraday] = await Promise.all(["store.json", "market.json", "quotes.json", "revenue.json", "news.json", "status.json", "intraday.json"].map(prev));
   const store = L.normalizeStore(pStore || L.emptyStore());
   Object.assign(status, pStatus?.sources || {});
   const FULL = MODE === "full" || !pStore || !pQuotes || !pMarket;
@@ -289,6 +289,30 @@ async function main() {
     ok("revenue", `${n} 家・${revenue.ym}`);
   } catch (e) { fail("revenue", e); }
 
+  // 7.5 盤中報價（證交所基本市況報導），只在平日盤中抓
+  let intraday = pIntraday && pIntraday.date === now.date ? pIntraday : null;
+  if (L.isMarketHours(now) && Object.keys(quotes.q).length) {
+    try {
+      const list = ["tse_t00.tw", ...Object.entries(quotes.q).map(([c, v]) => (v[7] === "上櫃" ? "otc_" : "tse_") + c + ".tw")];
+      const rows = {};
+      let date = null, time = null, okN = 0, failN = 0;
+      for (let i = 0; i < list.length; i += 50) {
+        try {
+          const r = L.parseMis(await get(`https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${list.slice(i, i + 50).join("|")}&json=1&delay=0&_=${Date.now()}`, { tries: 2, timeout: 20000 }));
+          Object.assign(rows, r.rows);
+          if (r.date && (!date || r.date > date)) date = r.date;
+          if (r.time && (!time || r.time > time)) time = r.time;
+          okN++;
+        } catch (e) { failN++; log("盤中報價", e.message); if (failN >= 3 && okN === 0) break; }
+        await sleep(250);
+      }
+      const n = Object.keys(rows).length;
+      if (!n) throw new Error("沒有取得任何盤中報價（證交所可能擋下了這台主機）");
+      intraday = { at: new Date().toISOString(), date: date || now.date, time, q: Object.fromEntries(Object.entries(rows).map(([c, v]) => [c, [v.last, v.prev, v.open, v.high, v.low, v.vol, v.time]])) };
+      ok("intraday", `${n} 檔・${time || ""}`);
+    } catch (e) { fail("intraday", e); }
+  }
+
   // 8. 新聞（Google 新聞 RSS＋Yahoo 股市 RSS），每個來源標記它屬於哪一類
   const gnews = (q) => "https://news.google.com/rss/search?q=" + encodeURIComponent(q) + "&hl=zh-TW&gl=TW&ceid=TW:zh-Hant";
   const feeds = [
@@ -325,6 +349,7 @@ async function main() {
   await w("market.json", market);
   await w("revenue.json", revenue);
   await w("news.json", news);
+  await w("intraday.json", intraday || { at: null, date: null, time: null, q: {} });
   await w("status.json", { updatedAt: new Date().toISOString(), mode: FULL ? "full" : "news", fullAt: FULL ? new Date().toISOString() : pStatus?.fullAt || null, days: store.days.length, firstDay: store.days[0] || null, lastDay: store.days[store.days.length - 1] || null, sources: status });
   let shards = 0;
   for (const code of L.storeCodes(store)) {

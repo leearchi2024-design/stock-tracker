@@ -491,3 +491,30 @@ export function upsertQuotes(store, date, rows) {
 export function ohlcDays(store) {
   return (store.h["2330"] || []).filter((x) => Number.isFinite(x)).length;
 }
+
+/** 證交所基本市況報導（盤中）getStockInfo.jsp → {date, time, rows:{code:{last,prev,open,high,low,vol,time}}} */
+export function parseMis(j) {
+  const rows = {};
+  let date = null, at = null;
+  for (const o of Array.isArray(j?.msgArray) ? j.msgArray : []) {
+    const code = String(o.c ?? "").trim();
+    if (!code) continue;
+    const prev = num(o.y);
+    let last = num(o.z);
+    if (last == null) last = num(String(o.b ?? "").split("_")[0]); // 這一筆沒有成交時，用最佳買價
+    if (last == null) last = num(o.pz);
+    if (last == null || prev == null) continue;
+    const d = toISODate(o.d);
+    if (d && (!date || d > date)) date = d;
+    if (o.t && (!at || o.t > at)) at = String(o.t);
+    rows[code] = { last, prev, open: num(o.o), high: num(o.h), low: num(o.l), vol: num(o.v), time: String(o.t || "") };
+  }
+  return { date, time: at, rows };
+}
+
+/** 現在是否為台股盤中（含盤前 5 分鐘與收盤後 15 分鐘）。now = {wd, hour, minute} */
+export function isMarketHours(now) {
+  if (now.wd < 1 || now.wd > 5) return false;
+  const m = now.hour * 60 + (now.minute || 0);
+  return m >= 8 * 60 + 55 && m <= 13 * 60 + 45;
+}

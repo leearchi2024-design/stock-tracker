@@ -142,6 +142,25 @@ t("三大法人金額、加權走勢、排行、成交量", () => {
   assert.deepEqual(L.volumeTotals(s, new Set(["2330"])), { d: ["2026-11-04", "2026-11-05"], v: [100, 80] });
 });
 
+t("盤中報價（證交所基本市況報導）", () => {
+  const j = { rtcode: "0000", msgArray: [
+    { c: "2330", n: "台積電", z: "2,275.0000", y: "2260.0000", o: "2250.0000", h: "2280.0000", l: "2245.0000", v: "35021", t: "12:30:05", d: "20261106" },
+    { c: "2317", n: "鴻海", z: "-", b: "241.5000_241.0000_", y: "240.0000", o: "239.0000", h: "242.0000", l: "238.5000", v: "40111", t: "12:30:00", d: "20261106" },
+    { c: "t00", n: "發行量加權股價指數", z: "41800.12", y: "41574.00", t: "12:30:00", d: "20261106" },
+    { c: "9999", z: "-", y: "-" },
+  ] };
+  const r = L.parseMis(j);
+  assert.equal(r.date, "2026-11-06");
+  assert.equal(r.time, "12:30:05");
+  assert.deepEqual(r.rows["2330"], { last: 2275, prev: 2260, open: 2250, high: 2280, low: 2245, vol: 35021, time: "12:30:05" });
+  assert.equal(r.rows["2317"].last, 241.5);
+  assert.equal(r.rows["t00"].last, 41800.12);
+  assert.equal(r.rows["9999"], undefined);
+  assert.equal(L.isMarketHours({ wd: 5, hour: 12, minute: 30 }), true);
+  assert.equal(L.isMarketHours({ wd: 5, hour: 14, minute: 0 }), false);
+  assert.equal(L.isMarketHours({ wd: 6, hour: 10, minute: 0 }), false);
+});
+
 t("歷史資料庫：插入、補洞、裁切", () => {
   const s = L.emptyStore();
   L.upsertDay(s, "2026-11-04", "c", { "2330": 2260 });

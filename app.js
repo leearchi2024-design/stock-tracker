@@ -28,7 +28,7 @@ const mdhm = (iso) => { if (!iso) return "—"; const t = tpeParts(new Date(iso)
 const md = (iso) => (iso ? `${+iso.slice(5, 7)}/${+iso.slice(8, 10)}` : "—");
 
 /* ---------- 自動資料（GitHub Actions 每天產生） ---------- */
-const AUTO = { market: null, news: null, quotes: null, revenue: null, status: null, hist: {}, loadedAt: 0 };
+const AUTO = { market: null, news: null, quotes: null, revenue: null, status: null, intraday: null, hist: {}, loadedAt: 0 };
 const bust = () => Math.floor(Date.now() / 60000);
 async function getJson(p) {
   const r = await fetch(`${p}?t=${bust()}`, { cache: "no-store" });
@@ -36,14 +36,14 @@ async function getJson(p) {
   return r.json();
 }
 async function loadAuto() {
-  const names = ["market", "news", "quotes", "revenue", "status"];
+  const names = ["market", "news", "quotes", "revenue", "status", "intraday"];
   let got = 0;
   const res = await Promise.allSettled(names.map((n) => getJson(`data/${n}.json`).finally(() => splashProgress(++got))));
   res.forEach((r, i) => { if (r.status === "fulfilled") AUTO[names[i]] = r.value; });
   AUTO.loadedAt = Date.now();
   AUTO.hist = {};
   await loadHist(S.watch.map((w) => w.code));
-  splashProgress(6);
+  splashProgress(7);
   renderAll();
 }
 async function loadHist(codes) {
@@ -134,18 +134,27 @@ function signIn() {
   Sync.signIn().then(syncNow).catch((e) => setSync(Sync.wasSignedIn() ? "needTap" : "signedOut", e.message));
 }
 
+/* ---------- 盤中報價（今天的才算數） ---------- */
+const liveQ = (code) => { const it = AUTO.intraday; return it && it.date === todayStr() ? it.q?.[code] || null : null; };
+const liveTime = () => { const it = AUTO.intraday; return it && it.date === todayStr() && it.time ? it.time.slice(0, 5) : null; };
+
 /* ---------- 每檔股票的有效數據（自動優先，缺的才用手動） ---------- */
 function eff(st) {
   const q = AUTO.quotes?.q?.[st.code];
   const h = AUTO.hist[st.code];
   const rv = AUTO.revenue?.r?.[st.code];
   const e = { src: {}, q, rv };
-  const live = numOr(st.livePrice);
+  const live = numOr(st.livePrice), lq = liveQ(st.code);
   if (live != null) { e.price = live; e.src.price = "manual"; }
+  else if (lq) { e.price = lq[0]; e.src.price = "intraday"; }
   else if (q && q[1] != null) { e.price = q[1]; e.src.price = "auto"; }
   else { e.price = numOr(st.price); e.src.price = e.price != null ? "manual" : null; }
-  e.chg = q && q[1] != null && q[2] != null ? q[2] : null;
-  e.prev = e.chg != null ? +(q[1] - q[2]).toFixed(2) : numOr(st.prev);
+  if (lq) { e.prev = lq[1]; e.chg = +(e.price - lq[1]).toFixed(2); }
+  else {
+    e.chg = q && q[1] != null && q[2] != null ? q[2] : null;
+    e.prev = e.chg != null ? +(q[1] - q[2]).toFixed(2) : numOr(st.prev);
+    if (e.chg != null && e.src.price === "manual" && e.prev != null) e.chg = e.price - e.prev;
+  }
   if (e.chg == null && e.price != null && e.prev != null) e.chg = e.price - e.prev;
   // 收盤價與成交量
   const hc = [], hv = [], ho = [], hh = [], hl = [], hd = [];
@@ -155,6 +164,11 @@ function eff(st) {
   if (hc.length && hc.length >= mc.length) {
     e.closes = hc; e.vols = hv.every((x) => Number.isFinite(x)) ? hv : []; e.src.closes = "auto"; e.histFrom = h.d?.[h.c.findIndex((x) => Number.isFinite(x))];
     e.opens = ho; e.highs = hh; e.lows = hl; e.dates = hd; e.rawVols = hv;
+    const it = AUTO.intraday;
+    if (lq && it.date > (hd[hd.length - 1] || "")) {
+      e.closes = [...hc, lq[0]]; e.opens = [...ho, lq[2]]; e.highs = [...hh, lq[3]]; e.lows = [...hl, lq[4]]; e.dates = [...hd, it.date]; e.rawVols = [...hv, lq[5]];
+      e.vols = e.vols.length ? [...e.vols, lq[5]] : []; e.liveBar = true;
+    }
   } else { e.closes = mc; e.vols = []; e.src.closes = mc.length ? "manual" : null; e.opens = e.highs = e.lows = null; e.dates = null; e.rawVols = null; }
   // 籌碼：最近 5 個交易日
   const last5 = (a) => { if (!Array.isArray(a)) return null; const s = a.slice(-5).filter((x) => Number.isFinite(x)); return s.length ? s.reduce((x, y) => x + y, 0) : null; };
@@ -338,13 +352,15 @@ function renderTape() {
   const m = AUTO.market;
   if (!m) { $("#tape").innerHTML = `<div class="notice full">還沒有自動資料。GitHub Actions 第一次跑完（約 10 分鐘）後，這裡會顯示加權指數、費半與台積電 ADR。</div>`; return; }
   const us = m.us || {};
+  const tq = liveQ("t00");
+  const taiex = tq ? { close: tq[0], chg: +(tq[0] - tq[1]).toFixed(2), pct: +(((tq[0] - tq[1]) / tq[1]) * 100).toFixed(2), date: AUTO.intraday.date, live: true } : m.taiex;
   let adr = "";
   if (us.TSM?.close && us.TWD?.close) {
     const conv = (us.TSM.close * us.TWD.close) / 5;
     const tw = AUTO.quotes?.q?.["2330"]?.[1];
     adr = `<small class="sub">折台股 ${fmt(conv, 0)} 元${tw ? `，溢價 ${fmtP(((conv - tw) / tw) * 100)}` : ""}</small>`;
   }
-  $("#tape").innerHTML = tick("加權指數", m.taiex) + tick("費城半導體", us.SOX) + tick("那斯達克", us.IXIC) + tick("標普 500", us.GSPC) + tick("台積電 ADR（美元）", us.TSM, 2, adr);
+  $("#tape").innerHTML = tick(taiex?.live ? `加權指數・盤中 ${liveTime() || ""}` : "加權指數", taiex) + tick("費城半導體", us.SOX) + tick("那斯達克", us.IXIC) + tick("標普 500", us.GSPC) + tick("台積電 ADR（美元）", us.TSM, 2, adr);
 }
 function newsItem(n, mine) {
   const k = n.impact > 0 ? "bull" : n.impact < 0 ? "bear" : "", lab = n.impact > 0 ? "利多" : n.impact < 0 ? "利空" : "中性";
@@ -571,7 +587,7 @@ function renderTrend() {
   }).join("");
   renderStatus();
 }
-const SRC_NAMES = { insti_total: "三大法人買賣金額", twse_quotes: "上市收盤價", tpex_quotes: "上櫃收盤價", twse_pe: "上市本益比", tpex_pe: "上櫃本益比", twse_insti: "上市三大法人", tpex_insti: "上櫃三大法人", twse_margin: "融資餘額", taiex: "加權指數", us_market: "美股與 ADR", revenue: "月營收", news: "新聞", backfill: "歷史補抓" };
+const SRC_NAMES = { intraday: "盤中報價", insti_total: "三大法人買賣金額", twse_quotes: "上市收盤價", tpex_quotes: "上櫃收盤價", twse_pe: "上市本益比", tpex_pe: "上櫃本益比", twse_insti: "上市三大法人", tpex_insti: "上櫃三大法人", twse_margin: "融資餘額", taiex: "加權指數", us_market: "美股與 ADR", revenue: "月營收", news: "新聞", backfill: "歷史補抓" };
 function renderStatus() {
   const st = AUTO.status;
   if (!st) { $("#srcStatus").innerHTML = `<p class="sub" style="margin:0">讀不到自動資料。若剛建立 GitHub 專案，請等 Actions 第一次跑完。</p>`; return; }
@@ -623,7 +639,8 @@ function statHtml(g) {
 }
 function renderWatch() {
   const d = AUTO.quotes?.date;
-  $("#refNote").textContent = d ? `股價為 ${md(d)} 收盤（每個交易日 14:43 自動更新）。盤中想看即時價，可在個股裡填「盤中價」暫時覆蓋。` : "還沒有自動資料，目前顯示的是 11/4 收盤參考價。";
+  const lt = liveTime();
+  $("#refNote").textContent = lt ? `盤中報價 ${lt}（盤中約每 5 分鐘更新，不是逐筆即時）。收盤後 14:43 換成正式收盤價。` : d ? `股價為 ${md(d)} 收盤。平日 09:00–13:45 會改顯示盤中報價，約每 5 分鐘更新。` : "還沒有自動資料，目前顯示的是 11/4 收盤參考價。";
   $("#partyCount").textContent = `PARTY・${S.watch.length}`;
   const el = $("#watch");
   if (!S.watch.length) { el.innerHTML = `<div class="empty"><span>觀察清單是空的，從下方加入第一檔股票。</span></div>`; return; }
@@ -735,7 +752,8 @@ function candleHtml(st, e) {
   svg += `<rect x="${r1(x(si))}" y="0" width="2" height="${H_}" fill="var(--ink)" opacity=".35"/>`;
   const fmtP2 = (v) => (v == null ? "—" : fmt(v, v < 100 ? 2 : 1));
   const prevC = si > 0 ? C[si - 1] : off > 0 ? e.closes[off - 1] : null, chg = prevC ? C[si] - prevC : null;
-  const info = `<div class="kinfo"><span class="num">${esc(D?.[si] ? md(D[si]) : "")}</span>
+  const isLive = e.liveBar && si === n - 1;
+  const info = `<div class="kinfo"><span class="num">${esc(D?.[si] ? md(D[si]) : "")}${isLive ? ` 盤中 ${esc(liveTime() || "")}` : ""}</span>
     <span>開 <b class="num">${fmtP2(O?.[si])}</b></span><span>高 <b class="num">${fmtP2(H?.[si])}</b></span><span>低 <b class="num">${fmtP2(Lw?.[si])}</b></span><span>收 <b class="num ${cls(chg)}">${fmtP2(C[si])}</b></span>
     <span class="${cls(chg)}">${chg != null ? (chg > 0 ? "▲" : chg < 0 ? "▼" : "") + fmt(Math.abs(chg), 2) + " " + fmtP((chg / prevC) * 100) : ""}</span>${Number.isFinite(V[si]) ? `<span>量 <b class="num">${fmt(V[si])}</b> 張</span>` : ""}</div>`;
   const ranges = [[20, "1 月"], [60, "3 月"], [120, "6 月"]].map(([k, l]) => `<button type="button" data-krange="${k}" aria-pressed="${chartRange.n === k}">${l}</button>`).join("");
@@ -1121,7 +1139,7 @@ document.addEventListener("visibilitychange", () => {
 
 /* ---------- 啟動畫面 ---------- */
 const splashEl = $("#splash");
-let splashDone = 0, splashTotal = 6, splashTimer = null;
+let splashDone = 0, splashTotal = 7, splashTimer = null;
 function splashProgress(done) {
   if (!splashEl || splashEl.hidden) return;
   splashDone = Math.min(splashTotal, done);
@@ -1165,13 +1183,13 @@ sync.state = initialSyncState();
 saveLocal(); renderAll();
 loadAuto();
 setInterval(() => { renderClock(); if (!$("#v-news").hidden) renderTrend(); }, 60000);
-// 開著 APP 時每 5 分鐘重讀新聞與美股（GitHub 每 15 分鐘更新一次）
+// 開著 APP 時每 2 分鐘檢查新資料（GitHub 盤中每 5 分鐘、其他時間每 15 分鐘更新）
 async function refreshLight() {
   if (document.visibilityState !== "visible") return;
-  const names = ["news", "market", "status"];
+  const names = ["news", "market", "status", "intraday"];
   const res = await Promise.allSettled(names.map((n) => getJson(`data/${n}.json`)));
   let changed = false;
-  res.forEach((r, i) => { if (r.status === "fulfilled" && JSON.stringify(r.value?.updatedAt) !== JSON.stringify(AUTO[names[i]]?.updatedAt)) { AUTO[names[i]] = r.value; changed = true; } });
-  if (changed) { renderTape(); renderTrend(); renderWatch(); }
+  res.forEach((r, i) => { const key = (o) => JSON.stringify(o?.updatedAt ?? o?.at); if (r.status === "fulfilled" && key(r.value) !== key(AUTO[names[i]])) { AUTO[names[i]] = r.value; changed = true; } });
+  if (changed) { renderTape(); renderTrend(); renderWatch(); renderAccount(); }
 }
-setInterval(refreshLight, 5 * 60000);
+setInterval(refreshLight, 2 * 60000);
