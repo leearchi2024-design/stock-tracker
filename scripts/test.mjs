@@ -110,8 +110,8 @@ t("歷史資料庫：插入、補洞、裁切", () => {
   assert.deepEqual(s.days, ["2026-11-03", "2026-11-04"]);
   assert.equal(s.c["2317"], undefined);
   assert.deepEqual(L.shardOf(s, "2330").c, [null, 2261]);
-  const bad = L.normalizeStore({ days: ["a", "b"], c: { x: [1] } });
-  assert.deepEqual(bad.c.x, [1, null]);
+  const bad = L.normalizeStore({ days: ["a", "b"], c: { "2330": [1] } });
+  assert.deepEqual(bad.c["2330"], [1, null]);
   assert.deepEqual(bad.v, {});
 });
 
