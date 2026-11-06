@@ -1,5 +1,5 @@
-import { indicators, feeOf, taxOf, ledgerOf, normalizeState, mergeState, canon, tombKey } from "./core.js";
-import * as Sync from "./sync.js";
+import { indicators, feeOf, taxOf, ledgerOf, normalizeState, mergeState, canon, tombKey } from "./core.js?v=dev";
+import * as Sync from "./sync.js?v=dev";
 
 /* ---------- 工具 ---------- */
 const $ = (s) => document.querySelector(s);

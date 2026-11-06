@@ -44,6 +44,8 @@ jobs:
         run: |
           mkdir -p _site
           cp index.html style.css app.js core.js sync.js config.js _site/
+          # 每次發布換版本號，瀏覽器才不會沿用舊的程式
+          sed -i "s/?v=dev/?v=${GITHUB_SHA::8}/g" _site/index.html _site/app.js
           touch _site/.nojekyll
 
       - name: 抓公開股市資料
