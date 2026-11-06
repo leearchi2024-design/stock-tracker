@@ -341,7 +341,6 @@ function renderTape() {
   }
   $("#tape").innerHTML = tick("加權指數", m.taiex) + tick("費城半導體", us.SOX) + tick("那斯達克", us.IXIC) + tick("標普 500", us.GSPC) + tick("台積電 ADR（美元）", us.TSM, 2, adr);
 }
-let newsFilter = "all";
 function newsItem(n, mine) {
   const k = n.impact > 0 ? "bull" : n.impact < 0 ? "bear" : "", lab = n.impact > 0 ? "利多" : n.impact < 0 ? "利空" : "中性";
   const tags = (n.tags || []).map((t) => `<span class="chip">${esc(t)}</span>`).join("");
@@ -354,18 +353,196 @@ function newsItem(n, mine) {
     <div class="meta">${mine ? `<button class="ghost danger" data-delnote="${esc(n.id)}">刪除筆記</button>` : esc(n.src || "")}</div>
   </article>`;
 }
-function renderNews() {
+/* ---------- 資訊趨勢 ---------- */
+const TREND = [
+  ["tw", "台灣重大新聞"], ["us", "美國重大新聞"], ["earn", "財報"], ["bull", "利多資訊"], ["bear", "利空資訊"],
+  ["market", "大盤資訊"], ["insti", "三大法人走向"], ["mem", "記憶體資訊"], ["ai", "AI 資訊"],
+];
+let trendTab = TREND.some(([k]) => k === lsGet("st.trend")) ? lsGet("st.trend") : "tw";
+const MEM_STOCKS = [["2408", "南亞科"], ["2344", "華邦電"], ["2337", "旺宏"], ["3260", "威剛"], ["8299", "群聯"], ["4967", "十銓"], ["3006", "晶豪科"]];
+const AI_STOCKS = [["2330", "台積電"], ["2317", "鴻海"], ["2382", "廣達"], ["3231", "緯創"], ["6669", "緯穎"], ["2376", "技嘉"], ["3017", "奇鋐"], ["2308", "台達電"], ["2383", "台光電"], ["3661", "世芯-KY"], ["3443", "創意"]];
+// 舊版新聞沒有 cats 時，用標籤推算
+const LEGACY = { tw: () => true, us: (n) => (n.tags || []).includes("美股"), earn: (n) => (n.tags || []).includes("財報"), market: (n) => (n.tags || []).includes("大盤"), insti: (n) => /外資|投信|法人/.test(n.t), mem: (n) => (n.tags || []).includes("記憶體"), ai: (n) => (n.tags || []).includes("AI") };
+function newsOf(cat) {
   const items = AUTO.news?.items || [];
-  $("#newsStamp").textContent = AUTO.news?.updatedAt ? `更新於 ${mdhm(AUTO.news.updatedAt)}` : "";
-  const tags = ["大盤", "半導體", "AI", "總經", "政策", "財報"].filter((t) => items.some((n) => (n.tags || []).includes(t)));
-  const F = [["all", "全部"], ["watch", "我的觀察"], ["bull", "利多"], ["bear", "利空"], ...tags.map((t) => ["tag:" + t, t])];
-  $("#newsFilter").innerHTML = F.map(([k, l]) => `<button type="button" data-nf="${esc(k)}" aria-pressed="${newsFilter === k}">${esc(l)}</button>`).join("");
-  const keep = (n) => newsFilter === "all" || (newsFilter === "bull" && n.impact > 0) || (newsFilter === "bear" && n.impact < 0)
-    || (newsFilter === "watch" && S.watch.some((w) => n.t.includes(w.name) || n.t.includes(w.code)))
-    || (newsFilter.startsWith("tag:") && (n.tags || []).includes(newsFilter.slice(4)));
-  const list = items.filter(keep).slice(0, 30);
-  $("#newsList").innerHTML = !items.length ? `<div class="empty">還沒有自動新聞。GitHub Actions 每天 08:17、14:43、16:38、22:47 會更新。</div>`
-    : list.length ? list.map((n) => newsItem({ ...n, when: mdhm(n.time) }, false)).join("") : `<div class="empty">這個分類目前沒有新聞</div>`;
+  if (cat === "bull") return items.filter((n) => n.impact > 0);
+  if (cat === "bear") return items.filter((n) => n.impact < 0);
+  return items.filter((n) => (Array.isArray(n.cats) ? n.cats.includes(cat) : LEGACY[cat]?.(n)));
+}
+function newsList(items, limit = 20, empty = "這個分類目前沒有新聞") {
+  if (!AUTO.news) return `<div class="empty">還沒有自動新聞。GitHub Actions 每天 08:17、14:43、16:38、22:47 會更新。</div>`;
+  return items.length ? `<div class="news">${items.slice(0, limit).map((n) => newsItem({ ...n, when: mdhm(n.time) }, false)).join("")}</div>` : `<div class="empty">${esc(empty)}</div>`;
+}
+function newsPanel(title, items, limit = 20, sub = "") {
+  return `<div class="panel"><div class="sec-head"><h2>${esc(title)}</h2><span class="sub">${esc(sub || (AUTO.news?.updatedAt ? `${items.length} 則・更新於 ${mdhm(AUTO.news.updatedAt)}` : ""))}</span></div>${newsList(items, limit)}</div>`;
+}
+const usq = (k) => AUTO.market?.us?.[k] || null;
+function miniTick(label, o, digits = 2, note = "", unit = "") {
+  if (!o || o.close == null) return `<div class="tick"><span>${esc(label)}</span><b>—</b><small class="flat">尚無資料</small></div>`;
+  return `<div class="tick"><span>${esc(label)}・${md(o.date)}</span><b class="${cls(o.chg)}">${fmt(o.close, digits)}${unit}</b><small class="${cls(o.chg)}">${o.chg != null ? (o.chg > 0 ? "▲" : o.chg < 0 ? "▼" : "") + fmt(Math.abs(o.chg), digits) + "　" + fmtP(o.pct) : ""}</small>${note ? `<em>${note}</em>` : ""}</div>`;
+}
+/** 上漲紅、下跌綠的長條圖（0 在中間） */
+function barChart(vals, labels = []) {
+  const v = vals.map((x) => (Number.isFinite(x) ? x : 0));
+  if (!v.length) return `<div class="empty" style="padding:12px">尚無資料</div>`;
+  const W = 600, H = 84, P = 4, mx = Math.max(1e-9, ...v.map(Math.abs));
+  const bw = (W - 2 * P) / v.length, mid = H / 2;
+  const bars = v.map((x, i) => { const h = (Math.abs(x) / mx) * (mid - P); return `<rect x="${(P + i * bw + bw * 0.15).toFixed(1)}" y="${(x >= 0 ? mid - h : mid).toFixed(1)}" width="${(bw * 0.7).toFixed(1)}" height="${Math.max(h, 0.8).toFixed(1)}" fill="${x >= 0 ? "var(--up)" : "var(--down)"}"><title>${esc(labels[i] || "")} ${fmt(x, 1)}</title></rect>`; }).join("");
+  return `<svg class="barchart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="每日買賣超"><line x1="0" x2="${W}" y1="${mid}" y2="${mid}" stroke="var(--line)"/>${bars}</svg>`;
+}
+/** 加權指數走勢（含月線、季線） */
+function indexChart(s) {
+  if (!s || s.c.length < 2) return `<div class="empty" style="padding:14px">還沒有加權指數走勢資料</div>`;
+  const c = s.c, n = c.length, W = 600, H = 150, P = 8;
+  const mas = (k) => c.map((_, i) => (i >= k - 1 ? c.slice(i - k + 1, i + 1).reduce((a, b) => a + b, 0) / k : null));
+  const m20 = mas(20), m60 = mas(60);
+  const all = [...c, ...m20.filter(Boolean), ...m60.filter(Boolean)];
+  const mn = Math.min(...all), mx = Math.max(...all), rg = mx - mn || 1;
+  const x = (i) => P + (i * (W - 2 * P)) / (n - 1), y = (v) => H - P - ((v - mn) / rg) * (H - 2 * P);
+  const path = (arr) => arr.map((v, i) => (v == null ? "" : `${arr.slice(0, i).some((z) => z != null) ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`)).join("");
+  const col = c[n - 1] >= c[0] ? "var(--up)" : "var(--down)";
+  return `<svg class="spark" style="height:150px" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="加權指數近 ${n} 日走勢">
+    <path d="${path(c)} L${x(n - 1)},${H} L${x(0)},${H} Z" fill="${col}" opacity=".08"/>
+    <path d="${path(m60)}" fill="none" stroke="var(--accent)" stroke-width="1.4" vector-effect="non-scaling-stroke"/>
+    <path d="${path(m20)}" fill="none" stroke="var(--warn)" stroke-width="1.4" vector-effect="non-scaling-stroke"/>
+    <path d="${path(c)}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    <circle cx="${x(n - 1)}" cy="${y(c[n - 1])}" r="3.5" fill="${col}"/></svg>
+    <div class="row sub" style="justify-content:space-between"><span>${md(s.d[0])}～${md(s.d[n - 1])}　最低 <span class="num">${fmt(Math.min(...c))}</span>　最高 <span class="num">${fmt(Math.max(...c))}</span></span><span><span style="color:var(--warn)">━</span> 月線　<span style="color:var(--accent)">━</span> 季線</span></div>`;
+}
+/** 族群個股表（記憶體、AI） */
+function stockTable(list) {
+  const rows = list.map(([code, nm]) => {
+    const st = S.watch.find((w) => w.code === code) || newStock(code, AUTO.quotes?.q?.[code]?.[0] || nm, null, 0);
+    const a = analyze(st), e = a.e;
+    const pv = e.price != null && e.chg != null ? e.price - e.chg : null;
+    const inList = S.watch.some((w) => w.code === code);
+    return `<tr><td><span class="num sub">${esc(code)}</span> ${esc(st.name)}</td><td class="r num ${cls(e.chg)}">${e.price != null ? fmt(e.price, e.price < 100 ? 2 : 1) : "—"}</td><td class="r num ${cls(e.chg)}">${pv ? fmtP((e.chg / pv) * 100) : "—"}</td>
+      <td class="r num ${cls(e.foreign)}">${e.foreign != null ? fmt(e.foreign) : "—"}</td><td class="r num">${e.yoy != null ? fmtP(e.yoy) : "—"}</td><td class="r num">${e.pe != null ? fmt(e.pe, 1) : "—"}</td>
+      <td><span class="chip ${sigClass(a)}">${esc(sigLabel(a))}</span></td><td>${inList ? `<span class="sub">觀察中</span>` : `<button type="button" class="add" data-addwatch="${esc(code)}" data-name="${esc(st.name)}">＋觀察</button>`}</td></tr>`;
+  }).join("");
+  return `<div class="tbl"><table><thead><tr><th>股票</th><th class="r">收盤</th><th class="r">漲跌</th><th class="r">外資 5 日（張）</th><th class="r">營收 YoY</th><th class="r">本益比</th><th>訊號</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function usStockTable(keys) {
+  const names = { NVDA: "輝達", AMD: "AMD", MU: "美光", AVGO: "博通", AAPL: "蘋果", MSFT: "微軟", TSM: "台積電 ADR" };
+  return `<div class="tbl"><table><thead><tr><th>美股</th><th class="r">收盤（美元）</th><th class="r">漲跌</th><th>日期</th></tr></thead><tbody>${keys.map((k) => { const o = usq(k); return `<tr><td><span class="num sub">${k}</span> ${names[k] || k}</td><td class="r num ${cls(o?.chg)}">${o ? fmt(o.close, 2) : "—"}</td><td class="r num ${cls(o?.chg)}">${o ? fmtP(o.pct) : "—"}</td><td class="num sub">${o ? md(o.date) : ""}</td></tr>`; }).join("")}</tbody></table></div>`;
+}
+function peoplePanel(filterAi = false) {
+  const items = (AUTO.news?.items || []).filter((n) => (n.people || []).length && (!filterAi || (n.cats || []).includes("ai")));
+  const P = ["黃仁勳", "蘇姿丰", "馬斯克", "奧特曼", "川普", "Fed 主席"];
+  const roles = { "黃仁勳": "輝達執行長", "蘇姿丰": "AMD 執行長", "馬斯克": "特斯拉、xAI", "奧特曼": "OpenAI 執行長", "川普": "美國總統", "Fed 主席": "聯準會" };
+  const body = P.map((p) => { const hit = items.filter((n) => n.people.includes(p)).slice(0, 2); return `<div class="who"><b>${esc(p)}<small>${esc(roles[p])}</small></b><div>${hit.length ? hit.map((n) => `<div><a href="${esc(safeUrl(n.u))}" target="_blank" rel="noopener noreferrer">${esc(n.t)}</a><small>${esc(n.src || "")}・${mdhm(n.time)}</small></div>`).join("") : `<span class="sub">近 3 天沒有相關新聞</span>`}</div></div>`; }).join("");
+  return `<div class="panel"><div class="sec-head"><h2>名人發言追蹤</h2><span class="sub">AI 與政策風向球</span></div><div class="people">${body}</div></div>`;
+}
+const instiRows = () => AUTO.market?.insti || [];
+function preOpen() {
+  const sox = usq("SOX"), tsm = usq("TSM"), twd = usq("TWD");
+  const tw2330 = AUTO.quotes?.q?.["2330"]?.[1];
+  const conv = tsm?.close && twd?.close ? (tsm.close * twd.close) / 5 : null;
+  const avg = sox?.pct != null && tsm?.pct != null ? (sox.pct + tsm.pct) / 2 : sox?.pct ?? tsm?.pct ?? null;
+  const dir = avg == null ? ["", "尚無美股資料"] : avg >= 1 ? ["bull", "電子股偏多開出"] : avg <= -1 ? ["bear", "電子股偏空開出"] : ["", "電子股方向不明顯"];
+  const usNews = newsOf("us").slice(0, 3);
+  const today = upcoming(0).filter((e) => e.diff === 0);
+  const last = instiRows().at(-1);
+  return `<div class="panel"><div class="sec-head"><h2>判斷台股開盤</h2><span class="sub">依 Notion「美股與台股影響相關資訊」第七節</span></div>
+    <ol class="steps5">
+      <li class="${dir[0]}"><div><b>費半 ${fmtP(sox?.pct)}、台積電 ADR ${fmtP(tsm?.pct)} → ${esc(dir[1])}</b>
+        <p>${conv ? `ADR 折合台股約 <span class="num">${fmt(conv, 1)}</span> 元${tw2330 ? `，比台積電收盤 ${fmt(tw2330, 0)} 元${conv >= tw2330 ? "溢價" : "折價"} ${fmtP(((conv - tw2330) / tw2330) * 100)}` : ""}（1 單位 ADR = 5 股）。` : "等美股資料更新後計算 ADR 折合台股價。"}</p></div></li>
+      <li><div><b>看台指期夜盤，估算開盤點數</b><p>夜盤是最直接的開盤預估，這個 APP 抓不到，請看看盤軟體或 <a href="https://www.taifex.com.tw" target="_blank" rel="noopener noreferrer">期交所</a>。</p></div></li>
+      <li><div><b>查美股漲跌的原因：單一事件還是趨勢改變？</b>${usNews.length ? `<p>${usNews.map((n) => `<a href="${esc(safeUrl(n.u))}" target="_blank" rel="noopener noreferrer">${esc(n.t)}</a>`).join("<br>")}</p>` : `<p>還沒有美國新聞。</p>`}</div></li>
+      <li><div><b>今天台灣、美國有沒有重要數據或財報</b><p>${today.length ? today.map((e) => esc(e.title)).join("、") : "今天沒有排定的固定數據，仍請留意個股法說會。"}</p></div></li>
+      <li class="${last ? (last.foreign > 0 ? "bull" : last.foreign < 0 ? "bear" : "") : ""}"><div><b>收盤後看三大法人：外資有沒有跟著美股方向操作</b><p>${last ? `最新（${md(last.date)}）外資 ${last.foreign > 0 ? "買超" : "賣超"} <span class="num">${fmt(Math.abs(last.foreign), 1)}</span> 億、投信 ${last.trust >= 0 ? "買超" : "賣超"} <span class="num">${fmt(Math.abs(last.trust), 1)}</span> 億。` : "每天約 15:00 後公布。"}</p></div></li>
+    </ol></div>`;
+}
+function usEconTable() {
+  const { dst } = dayline();
+  const tp = (h, m, nextDay = false) => { const t = (h + (dst ? 12 : 13)) * 60 + m; const hh = Math.floor(t / 60) % 24; return `${nextDay || t >= 1440 ? "隔天 " : ""}${pad(hh)}:${pad(t % 60)}`; };
+  const R = [["非農就業報告", "每月第一個週五", tp(8, 30), "就業與薪資強，升息預期升高"], ["CPI 消費者物價指數", "每月中旬", tp(8, 30), "通膨高於預期，利空股市"], ["PCE 物價指數", "每月下旬", tp(8, 30), "Fed 最重視的通膨指標"], ["初領失業救濟金", "每週四", tp(8, 30), "就業市場即時溫度"], ["ISM 製造業 PMI", "每月第一個工作日", tp(10, 0), "50 以上代表擴張"], ["FOMC 利率決議", "每年 8 次（下次 12/9）", tp(14, 0), "升降息與主席談話"]];
+  return `<div class="panel"><div class="sec-head"><h2>美國重要經濟數據</h2><span class="sub">台灣時間・目前為${dst ? "夏令" : "冬令"}</span></div>
+    <div class="tbl"><table><thead><tr><th>數據</th><th>公布日</th><th>台灣時間</th><th>解讀重點</th></tr></thead><tbody>${R.map((r) => `<tr><td><b>${r[0]}</b></td><td>${r[1]}</td><td class="num">${r[2]}</td><td class="wrapcell">${r[3]}</td></tr>`).join("")}</tbody></table></div></div>`;
+}
+function breadth(mkt) {
+  const q = Object.values(AUTO.quotes?.q || {}).filter((r) => r[7] === mkt && r[2] != null);
+  if (!q.length) return "";
+  const u = q.filter((r) => r[2] > 0).length, d = q.filter((r) => r[2] < 0).length, f = q.length - u - d;
+  return `<div class="bars"><div class="lab"><span>${mkt}</span><span><b class="up">漲 ${u}</b>　<b class="down">跌 ${d}</b>　<span class="sub">平 ${f}</span></span></div>
+    <div class="breadth" role="img" aria-label="${mkt}上漲 ${u} 家、下跌 ${d} 家、平盤 ${f} 家"><i class="u" style="width:${(u / q.length) * 100}%"></i><i class="f" style="width:${(f / q.length) * 100}%"></i><i class="d" style="width:${(d / q.length) * 100}%"></i></div></div>`;
+}
+function rankTable(title, rows, unit = "張") {
+  if (!rows || !rows.length) return `<div class="box"><h3>${esc(title)}</h3><p class="sub" style="margin:0">尚無資料</p></div>`;
+  return `<div class="box"><h3>${esc(title)}</h3><div class="tbl"><table><tbody>${rows.map(([c, n, v], i) => `<tr><td class="num sub">${i + 1}</td><td><span class="num sub">${esc(c)}</span> ${esc(n || AUTO.quotes?.q?.[c]?.[0] || "")}</td><td class="r num ${cls(v)}">${v > 0 ? "+" : ""}${fmt(v)} ${unit}</td></tr>`).join("")}</tbody></table></div></div>`;
+}
+const sumLast = (arr, k, n) => arr.slice(-n).reduce((s, x) => s + (x[k] || 0), 0);
+
+const TREND_RENDER = {
+  tw: () => newsPanel("台灣重大新聞", newsOf("tw"), 25),
+  us: () => {
+    const vix = usq("VIX");
+    const vixNote = vix ? (vix.close > 30 ? "高度恐慌（> 30）" : vix.close > 20 ? "偏緊張（> 20）" : "平穩（< 20）") : "";
+    return preOpen() + `<div class="panel"><div class="sec-head"><h2>開盤前必看清單</h2><span class="sub">美股收盤、ADR、利率、匯率、油價</span></div>
+      <div class="minitick">${miniTick("道瓊", usq("DJI"))}${miniTick("標普 500", usq("GSPC"))}${miniTick("那斯達克", usq("IXIC"))}${miniTick("費城半導體", usq("SOX"))}${miniTick("台積電 ADR", usq("TSM"))}${miniTick("VIX 恐慌指數", vix, 2, vixNote)}${miniTick("10 年期美債殖利率", usq("TNX"), 3, "上升時壓抑科技股", "%")}${miniTick("美元指數", usq("DXY"))}${miniTick("美元兌新台幣", usq("TWD"), 3, "台幣升值利外資匯入")}${miniTick("WTI 原油", usq("WTI"))}${miniTick("布蘭特原油", usq("BRENT"))}</div></div>
+      <div class="panel"><div class="sec-head"><h2>重要科技股</h2><span class="sub">財報與財測直接影響台灣半導體族群</span></div>${usStockTable(["NVDA", "AMD", "MU", "AVGO", "AAPL", "MSFT"])}</div>`
+      + peoplePanel() + newsPanel("美國重大新聞", newsOf("us"), 25) + usEconTable();
+  },
+  earn: () => {
+    const t = tpeParts(), y = t.y;
+    const dl = [[`${y}-03-31`, "年度財報"], [`${y}-05-15`, "第一季財報"], [`${y}-08-14`, "第二季財報"], [`${y}-11-14`, "第三季財報"], [`${y + 1}-03-31`, "年度財報"]];
+    const today = todayStr(), next = dl.find(([d]) => d >= today);
+    const days = next ? Math.round((Date.parse(next[0]) - Date.parse(today)) / 864e5) : null;
+    const rev10 = upcoming(40).find((e) => e.title.includes("營收公布期限"));
+    const rows = S.watch.map((w) => { const e = eff(w); return `<tr><td><span class="num sub">${esc(w.code)}</span> ${esc(w.name)}</td><td class="num sub">${esc(e.revYm || "—")}</td><td class="r num ${cls(e.yoy)}">${e.yoy != null ? fmtP(e.yoy) : "—"}</td><td class="r num ${cls(e.mom)}">${e.mom != null ? fmtP(e.mom) : "—"}</td><td>${e.yoy == null ? "" : e.yoy >= 20 ? `<span class="chip bull">成長強勁</span>` : e.yoy > 0 ? `<span class="chip">成長</span>` : `<span class="chip bear">衰退</span>`}</td></tr>`; }).join("");
+    return `<div class="grid2"><div class="panel"><span class="sub">下一個財報期限</span><div class="big">${next ? md(next[0]) : "—"}</div><span>${next ? `${esc(next[1])}・還有 ${days} 天` : ""}</span><p class="sub" style="margin:0">金控、銀行、證券、保險期限不同，約差兩週。</p></div>
+      <div class="panel"><span class="sub">下一次月營收公布期限</span><div class="big">${rev10 ? md(new Date(rev10.ms).toISOString().slice(0, 10)) : "—"}</div><span>${rev10 ? `${esc(rev10.title)}・還有 ${rev10.diff} 天` : ""}</span><p class="sub" style="margin:0">看月增率 MoM、年增率 YoY。</p></div></div>
+      <div class="panel"><div class="sec-head"><h2>觀察清單月營收</h2><span class="sub">每天自動更新，公布後就會出現</span></div>${S.watch.length ? `<div class="tbl"><table><thead><tr><th>股票</th><th>資料月份</th><th class="r">年增 YoY</th><th class="r">月增 MoM</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">觀察清單是空的</div>`}</div>`
+      + newsPanel("財報與法說會新聞", newsOf("earn"), 25);
+  },
+  bull: () => newsPanel("利多資訊", newsOf("bull"), 30, "") + `<p class="sub" style="margin:0">利多／利空由標題關鍵字自動判斷，只是初步分類，請點進原文確認。</p>`,
+  bear: () => newsPanel("利空資訊", newsOf("bear"), 30, "") + `<p class="sub" style="margin:0">利多／利空由標題關鍵字自動判斷，只是初步分類，請點進原文確認。</p>`,
+  market: () => {
+    const tx = AUTO.market?.taiex, s = AUTO.market?.twiiSeries;
+    const c = s?.c || [], n = c.length;
+    const ma = (k) => (n >= k ? c.slice(-k).reduce((a, b) => a + b, 0) / k : null);
+    const m20 = ma(20), m60 = ma(60), last = tx?.close ?? c[n - 1];
+    const vol = AUTO.market?.volume, vv = vol?.v || [];
+    const v20 = vv.length >= 21 ? vv.slice(-21, -1).reduce((a, b) => a + b, 0) / 20 : null;
+    return `<div class="panel"><div class="sec-head"><h2>加權指數</h2><span class="sub">${tx ? md(tx.date) + " 收盤" : ""}</span></div>
+        <div class="row" style="gap:16px;align-items:baseline"><span class="big ${cls(tx?.chg)}">${fmt(last, 2)}</span><span class="num ${cls(tx?.chg)}">${tx?.chg != null ? (tx.chg > 0 ? "▲" : "▼") + fmt(Math.abs(tx.chg), 2) + "　" + fmtP(tx.pct) : ""}</span></div>
+        ${indexChart(s)}
+        <dl class="kv"><dt>月線（20 日）</dt><dd>${fmt(m20, 0)}${m20 && last ? `（距 ${fmtP(((last - m20) / m20) * 100)}）` : ""}</dd><dt>季線（60 日）</dt><dd>${fmt(m60, 0)}${m60 && last ? `（距 ${fmtP(((last - m60) / m60) * 100)}）` : ""}</dd></dl>
+        <p class="sub" style="margin:0">${m20 && m60 && last ? (last > m20 && m20 > m60 ? "指數在月線、季線之上，多頭排列。" : last < m20 && m20 < m60 ? "指數在月線、季線之下，空頭排列。" : "指數在均線之間整理，方向還不明確。") : ""}台積電權重高，漲跌常直接左右大盤。</p></div>
+      <div class="grid2"><div class="panel"><h3>漲跌家數</h3>${breadth("上市") || `<p class="sub">尚無資料</p>`}${breadth("上櫃")}</div>
+        <div class="panel"><div class="bars"><div class="lab"><h3>上市成交量</h3><span>${vv.length ? `<b>${fmt(vv.at(-1) / 1e4, 1)}</b> 萬張${v20 ? `・20 日均 ${fmt(v20 / 1e4, 1)} 萬張（${fmtP(((vv.at(-1) - v20) / v20) * 100)}）` : ""}` : "尚無資料"}</span></div>${vv.length ? barChart(vv.slice(-30).map((x, i, a) => (v20 ? x - v20 : x)), vol.d.slice(-30)) : ""}<p class="sub" style="margin:0">長條為與 20 日均量的差距，紅色代表量增。</p></div></div></div>`
+      + newsPanel("大盤新聞", newsOf("market"), 20);
+  },
+  insti: () => {
+    const R = instiRows(), last = R.at(-1), top = AUTO.market?.instiTop || {};
+    const tile = (lab, v) => `<div class="stat"><span>${lab}</span><b class="${cls(v)}">${v == null ? "—" : (v > 0 ? "+" : "") + fmt(v, 1)} 億</b></div>`;
+    const series = (k, lab) => `<div class="bars"><div class="lab"><span>${lab}・近 ${Math.min(20, R.length)} 日</span><span>5 日 <b class="${cls(sumLast(R, k, 5))}">${fmt(sumLast(R, k, 5), 1)}</b> 億　20 日 <b class="${cls(sumLast(R, k, 20))}">${fmt(sumLast(R, k, 20), 1)}</b> 億</span></div>${barChart(R.slice(-20).map((x) => x[k]), R.slice(-20).map((x) => md(x.date)))}</div>`;
+    return `<div class="panel"><div class="sec-head"><h2>三大法人買賣超</h2><span class="sub">${last ? `上市・${md(last.date)}・每天約 15:00 後更新` : "每天約 15:00 後公布"}</span></div>
+        <div class="stats">${tile("外資", last?.foreign)}${tile("投信", last?.trust)}${tile("自營商", last?.dealer)}${tile("合計", last?.total)}</div>
+        ${R.length ? series("foreign", "外資") + series("trust", "投信") + series("dealer", "自營商") : ""}
+        <p class="sub" style="margin:0">紅色買超、綠色賣超。外資連續買超通常代表資金回流；投信在季底、年底常有作帳買盤。</p></div>
+      <div class="panel"><div class="sec-head"><h2>個股買賣超排行</h2><span class="sub">${top.f ? md(top.f.date) : ""}・上市＋上櫃</span></div>
+        <div class="grid2">${rankTable("外資買超", top.f?.buy)}${rankTable("外資賣超", top.f?.sell)}${rankTable("投信買超", top.t?.buy)}${rankTable("投信賣超", top.t?.sell)}</div></div>`
+      + newsPanel("法人動向新聞", newsOf("insti"), 20);
+  },
+  mem: () => `<div class="panel"><div class="sec-head"><h2>記憶體族群</h2><span class="sub">DRAM、NAND、模組與控制 IC</span></div>${stockTable(MEM_STOCKS)}${usStockTable(["MU"])}</div>` + newsPanel("記憶體新聞", newsOf("mem"), 25),
+  ai: () => `<div class="panel"><div class="sec-head"><h2>AI 供應鏈</h2><span class="sub">晶圓代工、伺服器、散熱、電源、PCB、ASIC</span></div>${stockTable(AI_STOCKS)}${usStockTable(["NVDA", "AMD", "AVGO", "MSFT"])}</div>`
+    + peoplePanel(true) + newsPanel("AI 新聞", newsOf("ai"), 25),
+};
+async function ensureGroupHist() {
+  const codes = trendTab === "mem" ? MEM_STOCKS.map((x) => x[0]) : trendTab === "ai" ? AI_STOCKS.map((x) => x[0]) : [];
+  const missing = codes.filter((c) => !(c in AUTO.hist));
+  if (!missing.length) return;
+  await loadHist(missing);
+  renderTrend();
+}
+function renderTrend() {
+  $("#trendTabs").innerHTML = TREND.map(([k, l]) => {
+    const n = k === "us" || k === "market" || k === "insti" ? "" : newsOf(k).length;
+    return `<button type="button" role="tab" data-trend="${k}" aria-selected="${trendTab === k}">${esc(l)}${n ? `<span class="n">${n}</span>` : ""}</button>`;
+  }).join("");
+  $("#trendMain").innerHTML = TREND_RENDER[trendTab]();
+  ensureGroupHist();
   const notes = S.notes.slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   $("#myNotes").innerHTML = notes.length ? notes.map((n) => newsItem({ id: n.id, impact: +n.impact, when: md(n.date), t: n.title, codes: n.codes, tags: ["我的筆記"] }, true)).join("")
     : `<div class="empty">還沒有筆記。標註相關代號後，「股票追蹤」的消息面會一併計分。</div>`;
@@ -379,7 +556,7 @@ function renderNews() {
   }).join("");
   renderStatus();
 }
-const SRC_NAMES = { twse_quotes: "上市收盤價", tpex_quotes: "上櫃收盤價", twse_pe: "上市本益比", tpex_pe: "上櫃本益比", twse_insti: "上市三大法人", tpex_insti: "上櫃三大法人", twse_margin: "融資餘額", taiex: "加權指數", us_market: "美股與 ADR", revenue: "月營收", news: "新聞", backfill: "歷史補抓" };
+const SRC_NAMES = { insti_total: "三大法人買賣金額", twse_quotes: "上市收盤價", tpex_quotes: "上櫃收盤價", twse_pe: "上市本益比", tpex_pe: "上櫃本益比", twse_insti: "上市三大法人", tpex_insti: "上櫃三大法人", twse_margin: "融資餘額", taiex: "加權指數", us_market: "美股與 ADR", revenue: "月營收", news: "新聞", backfill: "歷史補抓" };
 function renderStatus() {
   const st = AUTO.status;
   if (!st) { $("#srcStatus").innerHTML = `<p class="sub" style="margin:0">讀不到自動資料。若剛建立 GitHub 專案，請等 Actions 第一次跑完。</p>`; return; }
@@ -637,7 +814,7 @@ function renderClock() {
   el.classList.toggle("live", p.live);
   el.querySelector("span").textContent = p.t;
 }
-function renderAll() { renderClock(); renderTape(); renderNews(); renderWatch(); renderAccount(); renderSync(); }
+function renderAll() { renderClock(); renderTape(); renderTrend(); renderWatch(); renderAccount(); renderSync(); }
 
 /* ---------- 事件 ---------- */
 document.addEventListener("click", (e) => {
@@ -645,7 +822,8 @@ document.addEventListener("click", (e) => {
   if (!t) return;
   const ds = t.dataset;
   if (ds.toggle) { openCode = openCode === ds.toggle ? null : ds.toggle; renderWatch(); return; }
-  if (ds.nf) { newsFilter = ds.nf; renderNews(); return; }
+  if (ds.trend) { trendTab = ds.trend; lsSet("st.trend", trendTab); renderTrend(); return; }
+  if (ds.addwatch) { if (!S.watch.some((w) => w.code === ds.addwatch)) { S.watch.push(newStock(ds.addwatch, ds.name || ds.addwatch)); commit(); renderWatch(); renderTrend(); } return; }
   if (ds.acct) { curAcct = ds.acct; renderAccount(); return; }
   if (ds.sync === "signin") { signIn(); return; }
   if (ds.sync === "now") { syncNow(); return; }
@@ -655,7 +833,7 @@ document.addEventListener("click", (e) => {
     if (sync.state === "ok" || (sync.state === "error" && Sync.hasToken())) { syncNow(); return; }
     location.hash = "account"; return;
   }
-  if ("delnote" in ds) { const n = S.notes.find((x) => x.id === ds.delnote); if (n) { bury("notes", n); S.notes = S.notes.filter((x) => x !== n); commit(); renderNews(); renderWatch(); } return; }
+  if ("delnote" in ds) { const n = S.notes.find((x) => x.id === ds.delnote); if (n) { bury("notes", n); S.notes = S.notes.filter((x) => x !== n); commit(); renderTrend(); renderWatch(); } return; }
   if ("rmask" in ds) { t.parentElement.innerHTML = `確定移除？<button type="button" class="danger" data-rmyes>移除</button><button type="button" class="ghost" data-rmno>取消</button>`; return; }
   if ("rmyes" in ds) { const code = t.closest("[data-rm]").dataset.rm; const w = S.watch.find((x) => x.code === code); if (w) { bury("watch", w); S.watch = S.watch.filter((x) => x !== w); } openCode = null; commit(); renderWatch(); return; }
   if ("rmno" in ds) { renderWatch(); return; }
@@ -756,7 +934,7 @@ $("#noteForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const codes = $("#noteCodes").value.split(/[,\s，、]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
   S.notes.push(stamp({ id: uid(), title: $("#noteTitle").value.trim(), impact: +$("#noteImpact").value, codes, date: $("#noteDate").value || todayStr() }));
-  e.target.reset(); $("#noteDate").value = todayStr(); commit(); renderNews(); renderWatch();
+  e.target.reset(); $("#noteDate").value = todayStr(); commit(); renderTrend(); renderWatch();
 });
 $("#asCode").addEventListener("input", () => {
   const q = AUTO.quotes?.q?.[$("#asCode").value.trim().toUpperCase()];
@@ -831,4 +1009,4 @@ $("#noteDate").value = todayStr();
 sync.state = initialSyncState();
 saveLocal(); renderAll();
 loadAuto();
-setInterval(() => { renderClock(); if (!$("#v-news").hidden) renderNews(); }, 60000);
+setInterval(() => { renderClock(); if (!$("#v-news").hidden) renderTrend(); }, 60000);

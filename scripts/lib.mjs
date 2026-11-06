@@ -287,30 +287,115 @@ const TAGS = [
   ["政策", /關稅|管制|制裁|政策|法案|監管|選舉|川普/], ["財報", /財報|營收|EPS|獲利|法說/i], ["航運", /航運|貨櫃|長榮|陽明|萬海/], ["金融", /金控|銀行|壽險|證券/],
 ];
 
-/** 依標題關鍵字判斷利多(1)／利空(-1)／中性(0)與標籤。 */
-export function classify(title) {
+// 「資訊趨勢」分頁：tw 台灣、us 美國、earn 財報、market 大盤、insti 三大法人、mem 記憶體、ai AI
+const US_RE = /美股|黃仁勳|蘇姿丰|馬斯克|奧特曼|道瓊|那斯達克|那指|標普|費半|費城半導體|華爾街|美國|美債|美元指數|聯準會|Fed|FOMC|鮑爾|華許|川普|白宮|國會|非農|CPI|PCE|輝達|NVIDIA|美光|Micron|AMD|超微|博通|高通|蘋果|微軟|Google|谷歌|Meta|亞馬遜|特斯拉|OpenAI|CoreWeave|ADR|期中選舉/i;
+const TW_RE = /台股|台灣|臺灣|台積電|加權|櫃買|上市|上櫃|央行|新台幣|台幣|鴻海|聯發科|廣達|緯創|緯穎|台達電|南亞科|華邦電|旺宏|國巨|外資|投信|金管會|國發會|經濟部|行政院|台指期|台廠/;
+const CAT_RE = {
+  earn: /財報|營收|EPS|每股盈餘|獲利|法說|財測|季報|年報|毛利率|配息|股利/i,
+  market: /台股|加權|大盤|上市櫃|台指期|成交量|萬點|千點|百點|收盤|開盤|盤後|盤中/,
+  insti: /外資|投信|自營商|三大法人|法人|籌碼|融資|融券|借券|買超|賣超/,
+  mem: /記憶體|DRAM|NAND|HBM|美光|Micron|南亞科|華邦電|旺宏|威剛|群聯|十銓|宇瞻|晶豪科|三星|海力士|SK hynix|鎧俠|Kioxia/i,
+  ai: /AI|人工智慧|伺服器|輝達|NVIDIA|GPU|資料中心|數據中心|算力|黃仁勳|奧特曼|OpenAI|CoWoS|ASIC|散熱|液冷|CPO|矽光子/i,
+};
+export const PEOPLE = [["黃仁勳", /黃仁勳|Jensen Huang/i], ["蘇姿丰", /蘇姿丰|Lisa Su/i], ["馬斯克", /馬斯克|Musk/i], ["奧特曼", /奧特曼|Altman/i], ["川普", /川普|Trump/i], ["Fed 主席", /鮑爾|華許|聯準會主席|Fed主席|Powell|Warsh/i]];
+
+/** 依標題關鍵字判斷利多(1)／利空(-1)／中性(0)、標籤、所屬分頁與提到的人物。hint 為抓取來源的分類。 */
+export function classify(title, hints = []) {
   const t = String(title ?? "");
   let s = 0;
   for (const w of BULL) if (t.includes(w)) s += 1;
   for (const w of BEAR) if (t.includes(w)) s -= 1;
   const tags = TAGS.filter(([, re]) => re.test(t)).map(([n]) => n).slice(0, 3);
-  return { impact: s > 0 ? 1 : s < 0 ? -1 : 0, tags };
+  // 分類只看標題內容；抓取來源只用來判斷台灣或美國（同一則新聞常被多個搜尋條件抓到）
+  const cats = new Set();
+  for (const [k, re] of Object.entries(CAT_RE)) if (re.test(t)) cats.add(k);
+  const onlyUsFeed = hints.length > 0 && hints.every((h) => h === "us");
+  const isUs = US_RE.test(t) || onlyUsFeed;
+  if (isUs) cats.add("us");
+  if (TW_RE.test(t) || !isUs) cats.add("tw");
+  const people = PEOPLE.filter(([, re]) => re.test(t)).map(([n]) => n);
+  return { impact: s > 0 ? 1 : s < 0 ? -1 : 0, tags, cats: [...cats].sort(), people };
 }
 
 /** 合併多個來源的新聞：去重、排序、限定天數與筆數。 */
-export function mergeNews(lists, { now = Date.now(), days = 3, limit = 60 } = {}) {
-  const seen = new Set();
-  const out = [];
-  const norm = (t) => t.replace(/[\s「」『』"'“”：:，,。！!？?（）()【】\[\]｜|-]/g, "").slice(0, 40);
+/** 合併多個來源的新聞：去重（重複的合併分類來源）、排序、限定天數與筆數。項目可帶 hints（抓取來源分類）。 */
+export function mergeNews(lists, { now = Date.now(), days = 3, limit = 220 } = {}) {
+  const byKey = new Map();
+  const norm = (t) => t.replace(/[\s「」『』"'“”：:，,。！!？?（）()【】\[\]｜|\-—–]/g, "").slice(0, 40);
   for (const it of lists.flat().sort((a, b) => String(b.time || "").localeCompare(String(a.time || "")))) {
-    const k = norm(it.t);
-    if (!k || seen.has(k)) continue;
+    const k = norm(it.t || "");
+    if (!k) continue;
     if (it.time && now - Date.parse(it.time) > days * 864e5) continue;
-    seen.add(k);
-    out.push({ ...it, ...classify(it.t) });
+    const hints = [...(it.hints || []), ...(it.cats || []).filter((c) => c === "us")];
+    const cur = byKey.get(k);
+    if (cur) { cur.hints = [...new Set([...cur.hints, ...hints])]; continue; }
+    byKey.set(k, { t: it.t, u: it.u, src: it.src, time: it.time, hints });
+  }
+  const out = [];
+  for (const it of byKey.values()) {
+    out.push({ t: it.t, u: it.u, src: it.src, time: it.time, ...classify(it.t, it.hints) });
     if (out.length >= limit) break;
   }
   return out;
+}
+
+/** 證交所 rwd BFI82U 三大法人買賣金額 → {foreign, trust, dealer, total}（億元） */
+export function parseBFI82U(j) {
+  if (!j || (j.stat && !/^ok$/i.test(j.stat))) return null;
+  const t = findTable(j, /單位名稱/, /買賣差額/);
+  if (!t) return null;
+  const r = { foreign: 0, trust: 0, dealer: 0, total: null };
+  let any = false;
+  for (const o of rowsOf(t)) {
+    const name = String(o["單位名稱"] ?? "").trim();
+    const v = num(o["買賣差額"]);
+    if (v == null) continue;
+    const yi = v / 1e8;
+    any = true;
+    if (/合計/.test(name)) r.total = yi;
+    else if (/外資/.test(name)) r.foreign += yi;
+    else if (/投信/.test(name)) r.trust += yi;
+    else if (/自營商/.test(name)) r.dealer += yi;
+  }
+  if (!any) return null;
+  for (const k of Object.keys(r)) if (r[k] != null) r[k] = Math.round(r[k] * 100) / 100;
+  if (r.total == null) r.total = Math.round((r.foreign + r.trust + r.dealer) * 100) / 100;
+  return r;
+}
+
+/** Yahoo chart API → 每日收盤序列 {d:[日期], c:[收盤]} */
+export function parseYahooSeries(j) {
+  const r = j?.chart?.result?.[0];
+  const ts = r?.timestamp, cl = r?.indicators?.quote?.[0]?.close;
+  if (!Array.isArray(ts) || !Array.isArray(cl)) return null;
+  const tz = r?.meta?.exchangeTimezoneName || "Asia/Taipei";
+  const f = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" });
+  const d = [], c = [];
+  ts.forEach((t, i) => { if (Number.isFinite(cl[i])) { d.push(f.format(new Date(t * 1000))); c.push(Math.round(cl[i] * 100) / 100); } });
+  return d.length ? { d, c } : null;
+}
+
+/** 歷史資料庫最後一個有資料的交易日，外資、投信買賣超前 10 名（張）。 */
+export function instiRanking(store, names = {}, n = 10) {
+  const top = {};
+  for (const [key, f] of [["f", "f"], ["t", "t"]]) {
+    const col = store[f];
+    let idx = -1;
+    for (let i = store.days.length - 1; i >= 0 && idx < 0; i--) if (Object.values(col).some((a) => Number.isFinite(a[i]))) idx = i;
+    if (idx < 0) { top[key] = null; continue; }
+    const rows = Object.entries(col).filter(([, a]) => Number.isFinite(a[idx]) && a[idx] !== 0).map(([code, a]) => [code, names[code] || "", Math.round(a[idx] / 1000)]);
+    rows.sort((a, b) => b[2] - a[2]);
+    top[key] = { date: store.days[idx], buy: rows.slice(0, n), sell: rows.slice(-n).reverse().filter((r) => r[2] < 0) };
+  }
+  return top;
+}
+
+/** 每天成交張數合計（只算 only 裡的代號，例如上市股票） */
+export function volumeTotals(store, only = null) {
+  const sums = store.days.map(() => 0);
+  const has = store.days.map(() => false);
+  for (const [code, a] of Object.entries(store.v)) if (!only || only.has(code)) a.forEach((x, i) => { if (Number.isFinite(x)) { sums[i] += x; has[i] = true; } });
+  return { d: store.days.filter((_, i) => has[i]), v: sums.filter((_, i) => has[i]) };
 }
 
 // ---------- 歷史資料庫 ----------

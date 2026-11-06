@@ -21,7 +21,7 @@
     <span class="phase" id="phase"><i></i><span>—</span></span>
     <button class="syncpill" id="syncPill" type="button">雲端同步</button>
     <nav class="tabs" aria-label="功能">
-      <a href="#news" data-v="news">重大新聞</a>
+      <a href="#news" data-v="news">資訊趨勢</a>
       <a href="#track" data-v="track">股票追蹤</a>
       <a href="#account" data-v="account">我的帳號</a>
       <a href="#guide" data-v="guide">分析要點</a>
@@ -30,17 +30,13 @@
 </header>
 
 <main class="wrap">
-  <!-- 重大新聞 -->
+  <!-- 資訊趨勢 -->
   <section class="view" id="v-news">
     <div class="tape" id="tape"></div>
+    <nav class="subtabs" id="trendTabs" aria-label="資訊分類"></nav>
     <div class="desk">
       <div class="view">
-        <div class="panel">
-          <div class="sec-head"><h2>重大新聞</h2><span class="sub" id="newsStamp"></span></div>
-          <div class="filters" id="newsFilter" role="group" aria-label="篩選新聞"></div>
-          <div class="news" id="newsList"></div>
-          <p class="sub" style="margin:0">利多／利空由標題關鍵字自動判斷，只是初步分類，請點進原文確認。</p>
-        </div>
+        <div class="view" id="trendMain"></div>
         <div class="panel">
           <div class="sec-head"><h2>我的新聞筆記</h2><span class="sub">標註相關代號後，會一起納入消息面判斷</span></div>
           <form class="form" id="noteForm">

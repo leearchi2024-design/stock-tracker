@@ -96,6 +96,48 @@ t("RSS 與新聞分類", () => {
   assert.equal(m[1].impact, 1);
 });
 
+t("資訊趨勢分類", () => {
+  const a = L.classify("美光財報優於預期 南亞科、華邦電記憶體股大漲");
+  assert.deepEqual(a.cats, ["earn", "mem", "tw", "us"]);
+  assert.equal(a.impact, 1);
+  const b = L.classify("外資賣超台股 300 億 加權指數跌破四萬兩千點");
+  assert.ok(b.cats.includes("insti") && b.cats.includes("market") && b.cats.includes("tw") && !b.cats.includes("us"));
+  assert.equal(b.impact, -1);
+  const c = L.classify("黃仁勳：AI 需求仍強，資料中心建置不會放緩", ["us"]);
+  assert.deepEqual(c.people, ["黃仁勳"]);
+  assert.ok(c.cats.includes("ai") && c.cats.includes("us"));
+  // 分類只看標題：從記憶體搜尋抓到、但標題無關的新聞不會被歸到記憶體
+  const m = L.mergeNews([[{ t: "某公司舉辦尾牙", u: "https://a", time: "2026-11-05T01:00:00Z", hints: ["mem"] }], [{ t: "某公司舉辦尾牙", u: "https://b", time: "2026-11-05T01:00:00Z", hints: ["us"] }]], { now: Date.parse("2026-11-05T02:00:00Z") });
+  assert.equal(m.length, 1);
+  assert.ok(!m[0].cats.includes("mem"));
+  assert.deepEqual(m[0].cats, ["tw"]);
+  // 只出現在美國來源的新聞歸美國；再合併一次分類不變
+  const us = L.mergeNews([[{ t: "某公司舉辦尾牙", u: "https://a", time: "2026-11-05T01:00:00Z", hints: ["us"] }]], { now: Date.parse("2026-11-05T02:00:00Z") });
+  assert.deepEqual(us[0].cats, ["us"]);
+  assert.deepEqual(L.mergeNews([us], { now: Date.parse("2026-11-05T02:00:00Z") })[0].cats, ["us"]);
+});
+
+t("三大法人金額、加權走勢、排行、成交量", () => {
+  const j = { stat: "OK", fields: ["單位名稱", "買進金額", "賣出金額", "買賣差額"], data: [
+    ["自營商(自行買賣)", "1", "1", "-1,200,000,000"], ["自營商(避險)", "1", "1", "300,000,000"], ["投信", "1", "1", "2,550,000,000"],
+    ["外資及陸資(不含外資自營商)", "1", "1", "-45,612,340,000"], ["外資自營商", "1", "1", "12,000,000"], ["合計", "1", "1", "-43,950,340,000"]] };
+  assert.deepEqual(L.parseBFI82U(j), { foreign: -456, trust: 25.5, dealer: -9, total: -439.5 });
+  assert.equal(L.parseBFI82U({ stat: "很抱歉" }), null);
+  const ys = L.parseYahooSeries({ chart: { result: [{ meta: { exchangeTimezoneName: "Asia/Taipei" }, timestamp: [Date.parse("2026-11-05T01:00:00Z") / 1000, Date.parse("2026-11-06T01:00:00Z") / 1000], indicators: { quote: [{ close: [42948.912, null] }] } }] } });
+  assert.deepEqual(ys, { d: ["2026-11-05"], c: [42948.91] });
+  const s = L.emptyStore();
+  L.upsertDay(s, "2026-11-04", "f", { "2330": 5000000, "2317": -3000000, "2454": 1000 });
+  L.upsertDay(s, "2026-11-05", "c", { "2330": 1 });
+  L.upsertDay(s, "2026-11-04", "v", { "2330": 100, "6488": 50 });
+  L.upsertDay(s, "2026-11-05", "v", { "2330": 80 });
+  const r = L.instiRanking(s, { "2330": "台積電" }, 2);
+  assert.equal(r.f.date, "2026-11-04");
+  assert.deepEqual(r.f.buy, [["2330", "台積電", 5000], ["2454", "", 1]]);
+  assert.deepEqual(r.f.sell, [["2317", "", -3000]]);
+  assert.equal(r.t, null);
+  assert.deepEqual(L.volumeTotals(s, new Set(["2330"])), { d: ["2026-11-04", "2026-11-05"], v: [100, 80] });
+});
+
 t("歷史資料庫：插入、補洞、裁切", () => {
   const s = L.emptyStore();
   L.upsertDay(s, "2026-11-04", "c", { "2330": 2260 });

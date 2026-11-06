@@ -234,17 +234,45 @@ async function main() {
     market.taiex = { ...t, date: t.date || quotes.date };
     ok("taiex");
   } catch (e) { fail("taiex", e); }
-  const YH = { TWII: "^TWII", SOX: "^SOX", IXIC: "^IXIC", GSPC: "^GSPC", DJI: "^DJI", TSM: "TSM", TWD: "TWD=X" };
+  // 開盤前必看：四大指數、ADR、匯率、美債、美元、油價、VIX、重要科技股
+  const YH = {
+    TWII: "^TWII", SOX: "^SOX", IXIC: "^IXIC", GSPC: "^GSPC", DJI: "^DJI", TSM: "TSM", TWD: "TWD=X",
+    VIX: "^VIX", TNX: "^TNX", DXY: "DX-Y.NYB", WTI: "CL=F", BRENT: "BZ=F",
+    NVDA: "NVDA", AMD: "AMD", MU: "MU", AVGO: "AVGO", AAPL: "AAPL", MSFT: "MSFT",
+  };
   let yOk = 0;
   for (const [k, sym] of Object.entries(YH)) {
     try {
-      const r = L.parseYahooChart(await get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=10d&interval=1d`));
+      const j = await get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=${k === "TWII" ? "6mo" : "10d"}&interval=1d`);
+      const r = L.parseYahooChart(j);
       if (r) { market.us[k] = r; yOk++; }
+      if (k === "TWII") { const s = L.parseYahooSeries(j); if (s) market.twiiSeries = s; }
     } catch (e) { log("Yahoo", sym, e.message); }
-    await sleep(400);
+    await sleep(350);
   }
+  if (!market.twiiSeries && pMarket?.twiiSeries) market.twiiSeries = pMarket.twiiSeries;
   yOk ? ok("us_market", `${yOk}/${Object.keys(YH).length}`) : fail("us_market", "Yahoo 全部失敗，沿用上次資料");
   if (!market.taiex && market.us.TWII) market.taiex = market.us.TWII;
+
+  // 三大法人買賣金額（億元），保留最近 40 個交易日
+  const insti = new Map((pMarket?.insti || []).map((x) => [x.date, x]));
+  const instiDays = [];
+  if (instiDate && (instiDate < now.date || now.hour >= 15)) instiDays.push(instiDate);
+  if (insti.size < 5) for (const d of weekdaysBack(instiDate || now.date, 15)) if (!instiDays.includes(d)) instiDays.push(d);
+  let instiGot = 0;
+  for (const d of instiDays) {
+    if (insti.has(d) && d !== instiDate) continue;
+    try {
+      const r = L.parseBFI82U(await get(`${TWSE_RWD}/fund/BFI82U?type=day&dayDate=${ymd(d)}&response=json`));
+      if (r) { insti.set(d, { date: d, ...r }); instiGot++; }
+    } catch (e) { log("BFI82U", d, e.message); }
+    await sleep(2300);
+  }
+  market.insti = [...insti.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-40);
+  if (instiDays.length) instiGot ? ok("insti_total", `${market.insti.length} 天・最新 ${market.insti.at(-1)?.date}`) : fail("insti_total", "尚未公布或抓取失敗");
+  // 外資、投信個股買賣超排行與全市場成交量
+  market.instiTop = L.instiRanking(store, Object.fromEntries(Object.entries(quotes.q).map(([k, v]) => [k, v[0]])));
+  market.volume = L.volumeTotals(store, new Set(Object.entries(quotes.q).filter(([, v]) => v[7] === "上市").map(([k]) => k)));
 
   // 7. 月營收（每月 10 日前公布）
   let revenue = pRevenue || { ym: null, r: {} };
@@ -257,16 +285,24 @@ async function main() {
     ok("revenue", `${n} 家・${revenue.ym}`);
   } catch (e) { fail("revenue", e); }
 
-  // 8. 新聞（Google 新聞 RSS＋Yahoo 股市 RSS）
+  // 8. 新聞（Google 新聞 RSS＋Yahoo 股市 RSS），每個來源標記它屬於哪一類
+  const gnews = (q) => "https://news.google.com/rss/search?q=" + encodeURIComponent(q) + "&hl=zh-TW&gl=TW&ceid=TW:zh-Hant";
   const feeds = [
-    ["https://news.google.com/rss/search?q=" + encodeURIComponent("台股 when:1d") + "&hl=zh-TW&gl=TW&ceid=TW:zh-Hant", ""],
-    ["https://news.google.com/rss/search?q=" + encodeURIComponent("(台積電 OR 半導體 OR AI伺服器 OR 法說會) when:1d") + "&hl=zh-TW&gl=TW&ceid=TW:zh-Hant", ""],
-    ["https://news.google.com/rss/search?q=" + encodeURIComponent("(美股 OR 費半 OR 聯準會 OR 關稅) when:1d") + "&hl=zh-TW&gl=TW&ceid=TW:zh-Hant", ""],
-    ["https://tw.stock.yahoo.com/rss?category=tw-market", "Yahoo股市"],
+    [gnews("台股 when:1d"), "", ["tw"]],
+    [gnews("(台積電 OR 加權指數 OR 台指期 OR 櫃買) when:1d"), "", ["tw"]],
+    [gnews("(美股 OR 道瓊 OR 那斯達克 OR 費半 OR 華爾街) when:1d"), "", ["us"]],
+    [gnews("(聯準會 OR Fed OR 非農 OR CPI OR 美債 OR 關稅) when:2d"), "", ["us"]],
+    [gnews("(黃仁勳 OR 蘇姿丰 OR 馬斯克 OR 奧特曼) when:2d"), "", ["us", "ai"]],
+    [gnews("(財報 OR 營收 OR 法說會 OR EPS OR 財測) 股 when:2d"), "", ["earn"]],
+    [gnews("(外資 OR 投信 OR 三大法人) 買超 OR 賣超 when:1d"), "", ["insti", "tw"]],
+    [gnews("(記憶體 OR DRAM OR NAND OR HBM OR 美光 OR 南亞科 OR 華邦電) when:2d"), "", ["mem"]],
+    [gnews("(AI伺服器 OR 輝達 OR 資料中心 OR CoWoS OR 算力) when:1d"), "", ["ai"]],
+    ["https://tw.stock.yahoo.com/rss?category=tw-market", "Yahoo股市", ["tw"]],
   ];
   const lists = [];
-  for (const [u, src] of feeds) {
-    try { lists.push(L.parseRss(await get(u, { type: "text" }), src)); } catch (e) { log("RSS", e.message); }
+  for (const [u, src, hints] of feeds) {
+    try { lists.push(L.parseRss(await get(u, { type: "text" }), src).map((x) => ({ ...x, hints }))); } catch (e) { log("RSS", e.message); }
+    await sleep(300);
   }
   let news = pNews || { updatedAt: null, items: [] };
   const fresh = lists.flat();
