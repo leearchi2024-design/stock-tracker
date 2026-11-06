@@ -28,7 +28,7 @@ const mdhm = (iso) => { if (!iso) return "—"; const t = tpeParts(new Date(iso)
 const md = (iso) => (iso ? `${+iso.slice(5, 7)}/${+iso.slice(8, 10)}` : "—");
 
 /* ---------- 自動資料（GitHub Actions 每天產生） ---------- */
-const AUTO = { market: null, news: null, quotes: null, revenue: null, status: null, intraday: null, hist: {}, loadedAt: 0 };
+const AUTO = { market: null, news: null, quotes: null, revenue: null, status: null, intraday: null, live: null, liveNews: null, hist: {}, loadedAt: 0 };
 const bust = () => Math.floor(Date.now() / 60000);
 async function getJson(p) {
   const r = await fetch(`${p}?t=${bust()}`, { cache: "no-store" });
@@ -135,8 +135,33 @@ function signIn() {
 }
 
 /* ---------- 盤中報價（今天的才算數） ---------- */
-const liveQ = (code) => { const it = AUTO.intraday; return it && it.date === todayStr() ? it.q?.[code] || null : null; };
-const liveTime = () => { const it = AUTO.intraday; return it && it.date === todayStr() && it.time ? it.time.slice(0, 5) : null; };
+// 先用即時轉送（Worker，約 10 秒一次），沒有的話用 GitHub 每 5 分鐘的盤中資料
+const liveSrc = (code) => [AUTO.live, AUTO.intraday].find((it) => it && it.date === todayStr() && (code == null ? it.time : it.q?.[code])) || null;
+const liveQ = (code) => liveSrc(code)?.q?.[code] || null;
+const liveTime = () => { const it = liveSrc(); return it ? it.time.slice(0, 5) : null; };
+const isRealtime = () => !!(AUTO.live && AUTO.live.date === todayStr() && Date.now() - Date.parse(AUTO.live.at) < 90000);
+
+/* ---------- 新聞：GitHub 資料＋即時轉送的新聞合併 ---------- */
+const normT = (t) => String(t || "").replace(/[\s「」『』"'“”：:，,。！!？?（）()【】\[\]｜|\-—–]/g, "").slice(0, 40);
+let newsCache = { a: null, b: null, items: [] };
+function allNews() {
+  const a = AUTO.news?.items || [], b = AUTO.liveNews?.items || [];
+  if (newsCache.a === a && newsCache.b === b) return newsCache.items;
+  const map = new Map();
+  for (const n of [...b, ...a]) {
+    const k = normT(n.t);
+    if (!k) continue;
+    const cur = map.get(k);
+    if (!cur) { map.set(k, { ...n }); continue; }
+    if (n.codes) cur.codes = [...new Set([...(cur.codes || []), ...n.codes])];
+    if ((n.score || 0) > (cur.score || 0)) { cur.score = n.score; cur.major = n.major; }
+  }
+  const items = [...map.values()].sort((x, y) => String(y.time || "").localeCompare(String(x.time || "")));
+  newsCache = { a, b, items };
+  return items;
+}
+const newsUpdatedAt = () => [AUTO.liveNews?.updatedAt, AUTO.news?.updatedAt].filter(Boolean).sort().pop() || null;
+const hasNews = () => !!(AUTO.news || AUTO.liveNews);
 
 /* ---------- 每檔股票的有效數據（自動優先，缺的才用手動） ---------- */
 function eff(st) {
@@ -194,7 +219,7 @@ const priceOf = (code) => { const w = S.watch.find((x) => x.code === code); if (
 /* ---------- 四面向評分 ---------- */
 function newsFor(st) {
   const now = Date.now();
-  const auto = (AUTO.news?.items || []).filter((n) => (n.t.includes(st.name) || n.t.includes(st.code)) && (!n.time || now - Date.parse(n.time) < 3 * 864e5));
+  const auto = allNews().filter((n) => (n.t.includes(st.name) || n.t.includes(st.code)) && (!n.time || now - Date.parse(n.time) < 3 * 864e5));
   const mine = S.notes.filter((n) => (n.codes || []).includes(st.code));
   return [...mine.map((n) => ({ impact: +n.impact, t: n.title })), ...auto.map((n) => ({ impact: n.impact, t: n.t }))];
 }
@@ -367,22 +392,22 @@ function newsItem(n, mine) {
   const k = n.impact > 0 ? "bull" : n.impact < 0 ? "bear" : "", lab = n.impact > 0 ? "利多" : n.impact < 0 ? "利空" : "中性";
   const tags = (n.tags || []).filter((t) => t !== "我的筆記").map((t) => esc(t)).join("・");
   const codes = mine ? (n.codes || []).map((c) => `<span class="chip info">${esc(c)} ${esc(S.watch.find((w) => w.code === c)?.name || "")}</span>`).join("")
-    : S.watch.filter((w) => n.t.includes(w.name) || n.t.includes(w.code)).map((w) => `<span class="chip info">${esc(w.code)} ${esc(w.name)}</span>`).join("");
+    : relatedCodes(n).map((c) => `<span class="chip info">${esc(c)} ${esc(myCodes().get(c) || "")}</span>`).join("");
   const title = mine ? esc(n.t) : `<a href="${esc(safeUrl(n.u))}" target="_blank" rel="noopener noreferrer">${esc(n.t)}</a>`;
   return `<article>
-    <div class="meta"><span class="stamp ${k}">${lab}</span>${tags ? `<span>${tags}</span>` : ""}${mine ? `<span>我的筆記</span>` : ""}${codes}</div>
+    <div class="meta">${n.major ? `<span class="stamp major">重大</span>` : ""}<span class="stamp ${k}">${lab}</span>${tags ? `<span>${tags}</span>` : ""}${mine ? `<span>我的筆記</span>` : ""}${codes}</div>
     <h3>${title}</h3>
     <div class="meta">${mine ? `<span class="num">${esc(n.when)}</span><button class="ghost danger" data-delnote="${esc(n.id)}">刪除筆記</button>` : `${esc(n.src || "")}<span class="num">${esc(n.when)}</span>`}</div>
   </article>`;
 }
 function leadStory(n, section) {
   const k = n.impact > 0 ? "bull" : n.impact < 0 ? "bear" : "";
-  return `<article class="lead"><div class="kicker"><span>HEADLINE</span><span class="stamp ${k}">${n.impact > 0 ? "利多" : n.impact < 0 ? "利空" : "中性"}</span><span class="num sub">${mdhm(n.time)}</span></div>
+  return `<article class="lead"><div class="kicker"><span>HEADLINE</span>${n.major ? `<span class="stamp major">重大</span>` : ""}<span class="stamp ${k}">${n.impact > 0 ? "利多" : n.impact < 0 ? "利空" : "中性"}</span><span class="num sub">${mdhm(n.time)}</span></div>
     <h2><a href="${esc(safeUrl(n.u))}" target="_blank" rel="noopener noreferrer">${esc(n.t)}</a></h2><span class="byline">${esc(n.src || "")}・${esc(section)}</span></article>`;
 }
 /* ---------- 資訊趨勢 ---------- */
 const TREND = [
-  ["tw", "台灣重大新聞"], ["us", "美國重大新聞"], ["earn", "財報"], ["bull", "利多資訊"], ["bear", "利空資訊"],
+  ["watch", "追蹤股新聞"], ["tw", "台灣重大新聞"], ["us", "美國重大新聞"], ["earn", "財報"], ["bull", "利多資訊"], ["bear", "利空資訊"],
   ["market", "大盤資訊"], ["insti", "三大法人走向"], ["mem", "記憶體資訊"], ["ai", "AI 資訊"],
 ];
 let trendTab = TREND.some(([k]) => k === lsGet("st.trend")) ? lsGet("st.trend") : "tw";
@@ -390,21 +415,36 @@ const MEM_STOCKS = [["2408", "南亞科"], ["2344", "華邦電"], ["2337", "旺�
 const AI_STOCKS = [["2330", "台積電"], ["2317", "鴻海"], ["2382", "廣達"], ["3231", "緯創"], ["6669", "緯穎"], ["2376", "技嘉"], ["3017", "奇鋐"], ["2308", "台達電"], ["2383", "台光電"], ["3661", "世芯-KY"], ["3443", "創意"]];
 // 舊版新聞沒有 cats 時，用標籤推算
 const LEGACY = { tw: () => true, us: (n) => (n.tags || []).includes("美股"), earn: (n) => (n.tags || []).includes("財報"), market: (n) => (n.tags || []).includes("大盤"), insti: (n) => /外資|投信|法人/.test(n.t), mem: (n) => (n.tags || []).includes("記憶體"), ai: (n) => (n.tags || []).includes("AI") };
-function newsOf(cat) {
-  const items = AUTO.news?.items || [];
-  if (cat === "bull") return items.filter((n) => n.impact > 0);
-  if (cat === "bear") return items.filter((n) => n.impact < 0);
-  return items.filter((n) => (Array.isArray(n.cats) ? n.cats.includes(cat) : LEGACY[cat]?.(n)));
+let onlyMajor = lsGet("st.major") === "1";
+/** 這則新聞跟我追蹤或持有的哪幾檔有關 */
+function myCodes() {
+  const m = new Map(S.watch.map((w) => [w.code, w.name]));
+  for (const t of S.trades) if (!m.has(t.code)) m.set(t.code, t.name || "");
+  return m;
+}
+function relatedCodes(n, mine = myCodes()) {
+  const out = new Set((n.codes || []).filter((c) => mine.has(c)));
+  for (const [c, name] of mine) if (n.t.includes(c) || (name && name.length >= 2 && n.t.includes(name))) out.add(c);
+  return [...out];
+}
+function newsOf(cat, { all = false } = {}) {
+  let items = allNews();
+  if (cat === "watch") { const mine = myCodes(); items = items.filter((n) => relatedCodes(n, mine).length); }
+  else if (cat === "bull") items = items.filter((n) => n.impact > 0);
+  else if (cat === "bear") items = items.filter((n) => n.impact < 0);
+  else items = items.filter((n) => (Array.isArray(n.cats) ? n.cats.includes(cat) : LEGACY[cat]?.(n)));
+  return onlyMajor && !all ? items.filter((n) => n.major) : items;
 }
 function newsList(items, limit = 20, empty = "這個分類目前沒有新聞", lead = "") {
-  if (!AUTO.news) return `<div class="empty"><span>還沒有自動新聞。GitHub Actions 每天 08:17、14:43、16:38、22:47 會更新。</span></div>`;
-  if (!items.length) return `<div class="empty"><span>${esc(empty)}</span></div>`;
+  if (!hasNews()) return `<div class="empty"><span>還沒有自動新聞，資料下載後就會出現。</span></div>`;
+  if (!items.length) return `<div class="empty"><span>${esc(onlyMajor ? "目前沒有重大新聞。關掉「只看重大」可看全部。" : empty)}</span></div>`;
   const list = items.slice(0, limit);
-  const head = lead ? leadStory(list.shift(), lead) : "";
+  let head = "";
+  if (lead) { const i = Math.max(0, list.findIndex((n) => n.major)); head = leadStory(list.splice(i, 1)[0], lead); }
   return head + (list.length ? `<div class="news cols2">${list.map((n) => newsItem({ ...n, when: mdhm(n.time) }, false)).join("")}</div>` : "");
 }
 function newsPanel(title, items, limit = 20, sub = "", lead = false) {
-  return `<div class="panel"><div class="sec-head"><h2>${esc(title)}</h2><span class="label">${esc(sub || (AUTO.news?.updatedAt ? `${items.length} 則・${mdhm(AUTO.news.updatedAt)} 更新` : ""))}</span></div>${newsList(items, limit, undefined, lead ? title : "")}</div>`;
+  return `<div class="panel"><div class="sec-head"><h2>${esc(title)}</h2><span class="label">${esc(sub || (newsUpdatedAt() ? `${items.length} 則・${mdhm(newsUpdatedAt())} 更新` : ""))}</span></div>${newsList(items, limit, undefined, lead ? title : "")}</div>`;
 }
 const usq = (k) => AUTO.market?.us?.[k] || null;
 const TICK_KEY = { "道瓊": "DJI", "標普 500": "GSPC", "那斯達克": "IXIC", "費城半導體": "SOX", "台積電 ADR": "TSM", "VIX 恐慌指數": "VIX", "10 年期美債殖利率": "TNX", "美元指數": "DXY", "美元兌新台幣": "TWD", "WTI 原油": "WTI", "布蘭特原油": "BRENT" };
@@ -460,7 +500,7 @@ function usStockTable(keys) {
   return `<div class="tbl"><table><thead><tr><th>美股</th><th class="r">收盤（美元）</th><th class="r">漲跌</th><th>日期</th></tr></thead><tbody>${keys.map((k) => { const o = usq(k); return `<tr><td><span class="num sub">${k}</span> ${names[k] || k}</td><td class="r num ${cls(o?.chg)}">${o ? fmt(o.close, 2) : "—"}</td><td class="r num ${cls(o?.chg)}">${o ? fmtP(o.pct) : "—"}</td><td class="num sub">${o ? md(o.date) : ""}</td></tr>`; }).join("")}</tbody></table></div>`;
 }
 function peoplePanel(filterAi = false) {
-  const items = (AUTO.news?.items || []).filter((n) => (n.people || []).length && (!filterAi || (n.cats || []).includes("ai")));
+  const items = allNews().filter((n) => (n.people || []).length && (!filterAi || (n.cats || []).includes("ai")));
   const P = ["黃仁勳", "蘇姿丰", "馬斯克", "奧特曼", "川普", "Fed 主席"];
   const roles = { "黃仁勳": "輝達執行長", "蘇姿丰": "AMD 執行長", "馬斯克": "特斯拉、xAI", "奧特曼": "OpenAI 執行長", "川普": "美國總統", "Fed 主席": "聯準會" };
   const body = P.map((p) => { const hit = items.filter((n) => n.people.includes(p)).slice(0, 2); return `<div class="who"><div class="av" aria-hidden="true"><span>${esc(p.slice(0, 1))}</span></div><div><b>${esc(p)}<small>${esc(roles[p])}</small></b>${hit.length ? hit.map((n) => `<div><a href="${esc(safeUrl(n.u))}" target="_blank" rel="noopener noreferrer">${esc(n.t)}</a><small>${esc(n.src || "")}・${mdhm(n.time)}</small></div>`).join("") : `<span class="sub">近 3 天沒有相關新聞</span>`}</div></div>`; }).join("");
@@ -507,6 +547,15 @@ function rankTable(title, rows, unit = "張") {
 const sumLast = (arr, k, n) => arr.slice(-n).reduce((s, x) => s + (x[k] || 0), 0);
 
 const TREND_RENDER = {
+  watch: () => {
+    const mine = myCodes();
+    if (!mine.size) return `<div class="panel"><div class="empty"><span>還沒有追蹤或持有的股票。到「股票追蹤」加入後，這裡會整理它們的新聞。</span></div></div>`;
+    const items = newsOf("watch");
+    const by = [...mine].map(([c, name]) => [c, name, items.filter((n) => relatedCodes(n, mine).includes(c)).length]);
+    return `<div class="panel"><div class="sec-head"><h2>追蹤股新聞</h2><span class="sub">觀察清單與持股・${AUTO.liveNews ? "即時搜尋每 3 分鐘" : "依標題比對股名與代號"}</span></div>
+      <div class="row" style="gap:6px;flex-wrap:wrap">${by.map(([c, name, k]) => `<span class="chip${k ? " info" : ""}">${esc(c)} ${esc(name)}・${k}</span>`).join("")}</div></div>`
+      + newsPanel("追蹤股新聞", items, 30, "", true);
+  },
   tw: () => newsPanel("台灣重大新聞", newsOf("tw"), 25, "", true),
   us: () => {
     const vix = usq("VIX");
@@ -571,12 +620,13 @@ async function ensureGroupHist() {
 }
 function renderTrend() {
   { const t = tpeParts(); $("#mastDate").textContent = `${t.y} 年 ${t.m} 月 ${t.d} 日　星期${"日一二三四五六"[t.wd]}`;
-    const u = AUTO.news?.updatedAt || AUTO.status?.updatedAt; $("#mastStamp").textContent = u ? `${mdhm(u)} 更新` : "尚未取得自動資料"; }
+    const u = newsUpdatedAt() || AUTO.status?.updatedAt; $("#mastStamp").textContent = (isRealtime() || AUTO.liveNews ? "● 即時・" : "") + (u ? `${mdhm(u)} 更新` : "尚未取得自動資料"); }
   $("#trendTabs").innerHTML = TREND.map(([k, l]) => {
     const n = k === "us" || k === "market" || k === "insti" ? "" : newsOf(k).length;
     return `<button type="button" role="tab" data-trend="${k}" aria-selected="${trendTab === k}">${esc(l)}${n ? `<span class="n">${n}</span>` : ""}</button>`;
   }).join("");
-  $("#trendMain").innerHTML = TREND_RENDER[trendTab]();
+  const majors = allNews().filter((n) => n.major).length;
+  $("#trendMain").innerHTML = `<div class="filterbar"><button type="button" class="toggle" data-major aria-pressed="${onlyMajor}"><i aria-hidden="true"></i>只看重大新聞</button><span class="sub">${majors ? `目前 ${majors} 則重大：多家媒體報導、或大漲大跌、法說、政策等` : "重大＝多家媒體報導、或大漲大跌、法說、政策等"}</span></div>` + TREND_RENDER[trendTab]();
   ensureGroupHist();
   const notes = S.notes.slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   $("#myNotes").innerHTML = notes.length ? notes.map((n) => newsItem({ id: n.id, impact: +n.impact, when: md(n.date), t: n.title, codes: n.codes, tags: ["我的筆記"] }, true)).join("")
@@ -626,7 +676,7 @@ function tickData(k) {
 function openTick(k) {
   const meta = TICKS[k]; if (!meta) return;
   const o = tickData(k), sr = AUTO.market?.series?.[k] || (k === "TWII" ? AUTO.market?.twiiSeries : null);
-  const news = (AUTO.news?.items || []).filter((n) => meta.re.test(n.t)).slice(0, 6);
+  const news = allNews().filter((n) => meta.re.test(n.t)).slice(0, 6);
   const c = sr?.c || [], n = c.length, ma = (p) => (n >= p ? c.slice(-p).reduce((a, b) => a + b, 0) / p : null);
   const last = o?.close ?? c[n - 1], m20 = ma(20), m60 = ma(60);
   const unit = meta.unit || "";
@@ -696,7 +746,7 @@ function statHtml(g) {
 function renderWatch() {
   const d = AUTO.quotes?.date;
   const lt = liveTime();
-  $("#refNote").textContent = lt ? `盤中報價 ${lt}（盤中約每 5 分鐘更新，不是逐筆即時）。收盤後 14:43 換成正式收盤價。` : d ? `股價為 ${md(d)} 收盤。平日 09:00–13:45 會改顯示盤中報價，約每 5 分鐘更新。` : "還沒有自動資料，目前顯示的是 11/4 收盤參考價。";
+  $("#refNote").textContent = lt && isRealtime() ? `● 即時報價 ${lt}（約每 10 秒更新，證交所盤中資料約有 5 秒延遲）。收盤後 14:43 換成正式收盤價。` : lt ? `盤中報價 ${lt}（盤中約每 5 分鐘更新，不是逐筆即時）。收盤後 14:43 換成正式收盤價。` : d ? `股價為 ${md(d)} 收盤。平日 09:00–13:45 會改顯示盤中報價，約每 5 分鐘更新。` : "還沒有自動資料，目前顯示的是 11/4 收盤參考價。";
   $("#partyCount").textContent = `PARTY・${S.watch.length}`;
   const el = $("#watch");
   if (!S.watch.length) { el.innerHTML = `<div class="empty"><span>觀察清單是空的，從下方加入第一檔股票。</span></div>`; return; }
@@ -998,6 +1048,7 @@ document.addEventListener("click", (e) => {
   const ds = t.dataset;
   if (ds.toggle) { openCode = openCode === ds.toggle ? null : ds.toggle; renderWatch(); return; }
   if (ds.trend) { trendTab = ds.trend; lsSet("st.trend", trendTab); renderTrend(); return; }
+  if ("major" in ds) { onlyMajor = !onlyMajor; lsSet("st.major", onlyMajor ? "1" : "0"); renderTrend(); return; }
   if (ds.addwatch) { if (!S.watch.some((w) => w.code === ds.addwatch)) { S.watch.push(newStock(ds.addwatch, ds.name || ds.addwatch)); commit(); renderWatch(); renderTrend(); } return; }
   if (ds.tick) { openTick(ds.tick); return; }
   if ("sheetclose" in ds) { closeSheet(); return; }
@@ -1252,3 +1303,51 @@ async function refreshLight() {
   if (changed) { renderTape(); renderTrend(); renderWatch(); renderAccount(); }
 }
 setInterval(refreshLight, 2 * 60000);
+
+/* ---------- 即時轉送（Cloudflare Worker）：股價約 10 秒、新聞約 3 分鐘 ---------- */
+const LIVE_API = String(window.STOCK_APP_CONFIG?.liveApi || "").replace(/\/+$/, "");
+const isMarketHours = (n) => n.wd >= 1 && n.wd <= 5 && n.hour * 60 + n.minute >= 535 && n.hour * 60 + n.minute <= 825; // 08:55–13:45
+const liveOk = /^https:\/\/[a-z0-9.-]+\.workers\.dev$/i.test(LIVE_API);
+function liveSymbols() {
+  const codes = new Set([...S.watch.map((w) => w.code), ...S.trades.map((t) => t.code)]);
+  if (trendTab === "mem") MEM_STOCKS.forEach(([c]) => codes.add(c));
+  if (trendTab === "ai") AI_STOCKS.forEach(([c]) => codes.add(c));
+  return [...codes].filter((c) => CODE_RE.test(c)).slice(0, 79).map((c) => (AUTO.quotes?.q?.[c]?.[7] === "上櫃" ? "otc:" : "tse:") + c);
+}
+async function liveGet(path) {
+  const r = await fetch(LIVE_API + path, { cache: "no-store" });
+  if (!r.ok) throw new Error(String(r.status));
+  return r.json();
+}
+const typing = () => { const a = document.activeElement; return !!(a && a.matches?.("input,textarea,select") && a.closest("#v-track,#v-account")); };
+function renderLive() {
+  renderTape();
+  if (!$("#v-news").hidden) renderTrend();
+  if (!typing()) { renderWatch(); renderAccount(); }
+}
+let liveBusy = false;
+async function pollQuote() {
+  if (!liveOk || liveBusy || document.visibilityState !== "visible") return;
+  const t = tpeParts();
+  if (!isMarketHours({ wd: t.wd, hour: t.h, minute: t.mi })) return;
+  liveBusy = true;
+  try {
+    const j = await liveGet("/quote?s=" + encodeURIComponent(liveSymbols().join(",")));
+    if (j && j.q && j.time !== AUTO.live?.time) { AUTO.live = j; renderLive(); }
+    else if (j) AUTO.live = j;
+  } catch {} finally { liveBusy = false; }
+}
+async function pollNews() {
+  if (!liveOk || document.visibilityState !== "visible") return;
+  try {
+    const w = [...myCodes()].filter(([c, n]) => CODE_RE.test(c) && n).slice(0, 30).map(([c, n]) => `${c}:${n.replace(/[\s"'<>&]/g, "").slice(0, 12)}`);
+    const j = await liveGet("/news?w=" + encodeURIComponent(w.join(",")));
+    if (j && Array.isArray(j.items)) { AUTO.liveNews = j; if (!$("#v-news").hidden) renderTrend(); if (!typing()) renderWatch(); }
+  } catch {}
+}
+if (liveOk) {
+  pollQuote(); pollNews();
+  setInterval(pollQuote, 10000);
+  setInterval(pollNews, 3 * 60000);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { pollQuote(); if (Date.now() - Date.parse(AUTO.liveNews?.at || 0) > 3 * 60000) pollNews(); } });
+}
