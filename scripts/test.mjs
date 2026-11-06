@@ -30,10 +30,16 @@ t("上市 STOCK_DAY_ALL", () => {
   assert.equal(Object.keys(r.rows).length, 1);
 });
 
-t("上櫃收盤", () => {
-  const r = L.parseTpexClose([{ Date: "1151104", SecuritiesCompanyCode: "6488", CompanyName: "環球晶", Close: "512.00", Change: "+3.00", TradingShares: "1,234,000" }]);
+t("上櫃收盤（排除權證、可轉債）", () => {
+  const row = (code, close) => ({ Date: "1151104", SecuritiesCompanyCode: code, CompanyName: "x", Close: close, Change: "+3.00", TradingShares: "1,234,000" });
+  const r = L.parseTpexClose([{ ...row("6488", "512.00"), CompanyName: "環球晶" }, row("00679B", "28.5"), row("64881", "105"), row("703456", "1.2"), row("2881A", "60")]);
   assert.equal(r.date, "2026-11-04");
   assert.deepEqual(r.rows["6488"], { name: "環球晶", close: 512, change: 3, vol: 1234 });
+  assert.deepEqual(Object.keys(r.rows).sort(), ["00679B", "2881A", "6488"]);
+  for (const c of ["2330", "0050", "00878", "006208", "00679B", "2881A"]) assert.ok(L.CODE_RE.test(c), c);
+  for (const c of ["64881", "703456", "03xxxP", "12"]) assert.ok(!L.CODE_RE.test(c), c);
+  const s = L.normalizeStore({ days: ["2026-11-04"], c: { "2330": [1], "703456": [2] } });
+  assert.deepEqual(Object.keys(s.c), ["2330"]);
 });
 
 t("rwd 表格（新舊格式）與歷史收盤", () => {

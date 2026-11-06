@@ -13,7 +13,7 @@ const numOr = (v) => (v === "" || v == null || !isFinite(+v) ? null : +v);
 const pad = (n) => String(n).padStart(2, "0");
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); return true; } catch { return false; } };
-const CODE_RE = /^[0-9]{4}[0-9A-Z]{0,2}$/;
+const CODE_RE = /^(?:\d{4}[A-Z]?|00\d{2,4}[A-Z]?)$/;
 const TZ = "Asia/Taipei";
 
 function tpeParts(date = new Date()) {

@@ -3,7 +3,9 @@
 
 export const FIELDS = ["c", "v", "f", "t", "m"]; // 收盤價、成交量(張)、外資買賣超(股)、投信買賣超(股)、融資餘額(張)
 export const MAX_DAYS = 130;
-export const CODE_RE = /^[0-9]{4}[0-9A-Z]{0,2}$/;
+// 股票與 ETF：4 碼（可帶一個英文字，如特別股 2881A）或 00 開頭的 ETF（0050、00878、00679B）。
+// 排除權證（6 碼數字）與可轉債（5 碼數字）。
+export const CODE_RE = /^(?:\d{4}[A-Z]?|00\d{2,4}[A-Z]?)$/;
 
 const stripTags = (s) => String(s ?? "").replace(/<[^>]*>/g, "").trim();
 
@@ -325,6 +327,7 @@ export function normalizeStore(s) {
   for (const f of FIELDS) {
     if (!s[f] || typeof s[f] !== "object") s[f] = {};
     for (const code of Object.keys(s[f])) {
+      if (!CODE_RE.test(code)) { delete s[f][code]; continue; } // 清掉舊版存進來的權證、可轉債
       const a = Array.isArray(s[f][code]) ? s[f][code].slice(0, n) : [];
       while (a.length < n) a.push(null);
       s[f][code] = a;

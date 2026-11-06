@@ -150,7 +150,7 @@ async function main() {
   }
 
   // 2. 最新收盤（上市＋上櫃）
-  const quotes = { date: pQuotes?.date || null, q: pQuotes?.q || {} };
+  const quotes = { date: pQuotes?.date || null, q: Object.fromEntries(Object.entries(pQuotes?.q || {}).filter(([k]) => L.CODE_RE.test(k))) };
   let tradeDate = null;
   try {
     const tw = L.parseTwseDayAll(await get(`${TWSE_OPEN}/exchangeReport/STOCK_DAY_ALL`));
