@@ -42,7 +42,7 @@
           <form class="form" id="noteForm">
             <label class="full">標題<input id="noteTitle" required maxlength="120" placeholder="例：台積電法說會上調全年營收指引"></label>
             <label>影響<select id="noteImpact"><option value="1">利多</option><option value="0" selected>中性</option><option value="-1">利空</option></select></label>
-            <label>相關代號<input id="noteCodes" placeholder="2330, 2454"></label>
+            <label>相關代號<input id="noteCodes" placeholder="2330, 2454" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false"></label>
             <label>日期<input type="date" id="noteDate"></label>
             <button class="primary" type="submit">新增筆記</button>
           </form>
@@ -74,7 +74,7 @@
     <div class="panel">
       <h3>加入觀察</h3>
       <form class="form" id="addStock">
-        <label>股票代號<input id="asCode" required maxlength="6" placeholder="2330" inputmode="numeric" autocomplete="off"></label>
+        <label>股票代號<input id="asCode" required maxlength="6" placeholder="2330 或 00679B" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="done"></label>
         <label>名稱<input id="asName" required maxlength="20" placeholder="輸入代號會自動帶入"></label>
         <button class="primary" type="submit">加入</button>
       </form>
@@ -105,7 +105,7 @@
             <div class="seg" role="group" aria-label="買賣"><button class="b" id="sideB" aria-pressed="true" type="button">買入</button><button class="s" id="sideS" aria-pressed="false" type="button">賣出</button></div></div>
           <form class="form two" id="tradeForm">
             <label class="full">帳戶<select id="tAcct"></select></label>
-            <label>股票代號<input id="tCode" list="codeList" required maxlength="6" autocomplete="off"></label>
+            <label>股票代號<input id="tCode" list="codeList" required maxlength="6" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false"></label>
             <label>名稱<input id="tName" maxlength="20"></label>
             <label>股數<input id="tQty" type="number" min="1" step="1" required placeholder="1000 = 1 張"></label>
             <label>成交價<input id="tPrice" type="number" min="0" step="0.01" required></label>

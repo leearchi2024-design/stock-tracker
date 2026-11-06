@@ -936,6 +936,8 @@ $("#noteForm").addEventListener("submit", (e) => {
   S.notes.push(stamp({ id: uid(), title: $("#noteTitle").value.trim(), impact: +$("#noteImpact").value, codes, date: $("#noteDate").value || todayStr() }));
   e.target.reset(); $("#noteDate").value = todayStr(); commit(); renderTrend(); renderWatch();
 });
+// 代號欄位：英文自動轉大寫、去掉空白
+for (const id of ["asCode", "tCode"]) $("#" + id).addEventListener("input", (e) => { const el = e.target, v = el.value.toUpperCase().replace(/\s/g, ""); if (v !== el.value) el.value = v; });
 $("#asCode").addEventListener("input", () => {
   const q = AUTO.quotes?.q?.[$("#asCode").value.trim().toUpperCase()];
   if (q && q[0]) $("#asName").value = q[0];
