@@ -10,13 +10,16 @@ export function emaSeries(a, n) {
   return out;
 }
 
-/** KD(9,3,3)，以收盤價近似最高最低價。 */
-export function kdSeries(a) {
+/** KD(9,3,3)。有最高、最低價就用真正的 9 日高低點；沒有就用收盤價近似。 */
+export function kdSeries(a, highs = null, lows = null) {
   let K = 50, D = 50;
   const ks = [], ds = [];
+  const hv = (i) => (highs && Number.isFinite(highs[i]) ? highs[i] : a[i]);
+  const lv = (i) => (lows && Number.isFinite(lows[i]) ? lows[i] : a[i]);
   for (let i = 0; i < a.length; i++) {
     if (i < 8) { ks.push(null); ds.push(null); continue; }
-    const w = a.slice(i - 8, i + 1), hi = Math.max(...w), lo = Math.min(...w);
+    let hi = -Infinity, lo = Infinity;
+    for (let j = i - 8; j <= i; j++) { hi = Math.max(hi, hv(j), a[j]); lo = Math.min(lo, lv(j), a[j]); }
     const rsv = hi === lo ? 50 : ((a[i] - lo) / (hi - lo)) * 100;
     K = (K * 2) / 3 + rsv / 3;
     D = (D * 2) / 3 + K / 3;
@@ -25,11 +28,12 @@ export function kdSeries(a) {
   return { ks, ds };
 }
 
-export function indicators(closes, vols = []) {
+export function indicators(closes, vols = [], highs = null, lows = null) {
   const c = closes, n = c.length, r = { n };
+  r.realKD = !!(highs && lows && highs.length === n && highs.slice(-9).every((x) => Number.isFinite(x)));
   r.ma5 = sma(c, 5); r.ma20 = sma(c, 20); r.ma60 = sma(c, 60);
   if (n >= 9) {
-    const { ks, ds } = kdSeries(c);
+    const { ks, ds } = r.realKD ? kdSeries(c, highs, lows) : kdSeries(c);
     r.k = ks[n - 1]; r.d = ds[n - 1];
     r.kp = n >= 10 ? ks[n - 2] : null; r.dp = n >= 10 ? ds[n - 2] : null;
   }

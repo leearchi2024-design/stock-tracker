@@ -148,11 +148,14 @@ function eff(st) {
   e.prev = e.chg != null ? +(q[1] - q[2]).toFixed(2) : numOr(st.prev);
   if (e.chg == null && e.price != null && e.prev != null) e.chg = e.price - e.prev;
   // 收盤價與成交量
-  const hc = [], hv = [];
-  if (h && Array.isArray(h.c)) h.c.forEach((c, i) => { if (Number.isFinite(c)) { hc.push(c); hv.push(h.v?.[i] ?? null); } });
+  const hc = [], hv = [], ho = [], hh = [], hl = [], hd = [];
+  const fin = (x) => (Number.isFinite(x) ? x : null);
+  if (h && Array.isArray(h.c)) h.c.forEach((c, i) => { if (Number.isFinite(c)) { hc.push(c); hv.push(h.v?.[i] ?? null); ho.push(fin(h.o?.[i])); hh.push(fin(h.h?.[i])); hl.push(fin(h.l?.[i])); hd.push(h.d?.[i] || ""); } });
   const mc = st.closes || [];
-  if (hc.length && hc.length >= mc.length) { e.closes = hc; e.vols = hv.every((x) => Number.isFinite(x)) ? hv : []; e.src.closes = "auto"; e.histFrom = h.d?.[h.c.findIndex((x) => Number.isFinite(x))]; }
-  else { e.closes = mc; e.vols = []; e.src.closes = mc.length ? "manual" : null; }
+  if (hc.length && hc.length >= mc.length) {
+    e.closes = hc; e.vols = hv.every((x) => Number.isFinite(x)) ? hv : []; e.src.closes = "auto"; e.histFrom = h.d?.[h.c.findIndex((x) => Number.isFinite(x))];
+    e.opens = ho; e.highs = hh; e.lows = hl; e.dates = hd; e.rawVols = hv;
+  } else { e.closes = mc; e.vols = []; e.src.closes = mc.length ? "manual" : null; e.opens = e.highs = e.lows = null; e.dates = null; e.rawVols = null; }
   // 籌碼：最近 5 個交易日
   const last5 = (a) => { if (!Array.isArray(a)) return null; const s = a.slice(-5).filter((x) => Number.isFinite(x)); return s.length ? s.reduce((x, y) => x + y, 0) : null; };
   const pickAuto = (key, autoVal, manual) => { if (autoVal != null) { e.src[key] = "auto"; return autoVal; } const m = numOr(manual); if (m != null) e.src[key] = "manual"; return m; };
@@ -184,7 +187,7 @@ function newsFor(st) {
 function analyze(st) {
   const e = eff(st);
   const out = { e, tech: { s: 0, r: [], ok: false }, chip: { s: 0, r: [], ok: false }, fund: { s: 0, r: [], ok: false }, news: { s: 0, r: [], ok: false } };
-  const px = e.price, ind = indicators(e.closes, e.vols);
+  const px = e.price, ind = indicators(e.closes, e.vols, e.highs, e.lows);
   out.ind = ind;
   const add = (g, v, txt) => { g.s += v; g.r.push({ v, txt }); g.ok = true; };
   const T = out.tech;
@@ -651,7 +654,7 @@ function detailHtml(st, a) {
     <div class="dialog ${a.verdict.k}"><strong>▶ ${esc(a.verdict.t)}</strong><span style="font-size:13.5px">${esc(a.verdict.d)}</span></div>
     ${a.risk ? `<div class="notice">${esc(a.risk.t)}</div>` : ""}
     ${a.pos ? `<div class="notice info">持有 ${fmt(a.pos.qty)} 股，平均成本 <span class="num">${fmt(a.pos.avg, 2)}</span>，損益 <b class="num ${cls(a.posPct)}">${fmtP(a.posPct)}</b>。停損 -${esc(st.stop)}%／停利 +${esc(st.take)}%</div>` : ""}
-    <div class="chart">${spark(e.closes)}</div>
+    ${candleHtml(st, e)}
     <div class="actions"><button type="button" class="buy" data-trade="buy" data-code="${esc(st.code)}">買入</button><button type="button" class="sell" data-trade="sell" data-code="${esc(st.code)}">賣出</button></div>
     <div class="cols">
       <div class="box"><div class="row" style="justify-content:space-between"><h3>技術面 <small class="sub">35%</small></h3>${grpScore(a.tech)}</div>${statHtml(a.tech)}${reasonsHtml(a.tech)}
@@ -683,8 +686,65 @@ function detailHtml(st, a) {
       <button class="primary" type="submit">儲存並重新判斷</button>
       <span data-rm="${esc(st.code)}" class="confirm"><button type="button" class="ghost danger" data-rmask>移出觀察清單</button></span>
     </form>
-    <p class="sub" style="margin:0">KD 以收盤價近似計算（未用最高最低價），會比看盤軟體略鈍。${st.upd ? `最後修改：${esc(st.upd)}` : ""}</p>
+    <p class="sub" style="margin:0">${i.realKD ? "KD 以每日最高、最低價計算。" : "KD 暫以收盤價近似計算（開高低價資料累積後會自動改用），會比看盤軟體略鈍。"}${st.upd ? `最後修改：${esc(st.upd)}` : ""}</p>
   </div>`;
+}
+
+
+/* ---------- 像素 K 線 ---------- */
+const chartRange = { n: (() => { const v = +lsGet("st.krange"); return [20, 60, 120].includes(v) ? v : 60; })() };
+const chartSel = {}; // code → 選取的 K 棒（從右邊數第幾根）
+function tvUrl(code) {
+  const mkt = AUTO.quotes?.q?.[code]?.[7] === "上櫃" ? "TPEX" : "TWSE";
+  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(mkt + ":" + code)}`;
+}
+function candleHtml(st, e) {
+  const tv = `<a class="tvlink" href="${esc(tvUrl(st.code))}" target="_blank" rel="noopener noreferrer">在 TradingView 開啟 ↗<small>分時、週 K、更多指標</small></a>`;
+  const all = e.closes.length;
+  if (all < 2) return `<div class="chart"><div class="empty" style="padding:14px"><span>累積到 2 天以上收盤價後顯示 K 線</span></div></div>${tv}`;
+  const n = Math.min(chartRange.n, all), off = all - n;
+  const C = e.closes.slice(off), O = e.opens?.slice(off), H = e.highs?.slice(off), Lw = e.lows?.slice(off), V = (e.rawVols || e.vols || []).slice(off), D = e.dates?.slice(off);
+  const hasOHLC = O && O.some((x) => x != null);
+  const hi = (i) => Math.max(C[i], H?.[i] ?? C[i], O?.[i] ?? C[i]), lo = (i) => Math.min(C[i], Lw?.[i] ?? C[i], O?.[i] ?? C[i]);
+  // 均線用完整資料計算，再切出顯示範圍
+  const maFull = (k) => e.closes.map((_, i) => (i >= k - 1 ? e.closes.slice(i - k + 1, i + 1).reduce((a, b) => a + b, 0) / k : null)).slice(off);
+  const m5 = maFull(5), m20 = maFull(20);
+  const vals = [...C.map((_, i) => hi(i)), ...C.map((_, i) => lo(i)), ...m5.filter(Boolean), ...m20.filter(Boolean)];
+  let mx = Math.max(...vals), mn = Math.min(...vals); const pad = (mx - mn) * 0.06 || 1; mx += pad; mn -= pad;
+  const W = 600, PH = 170, VH = 46, GAP = 8, H_ = PH + GAP + VH, P = 4;
+  const bw = (W - 2 * P) / n, x = (i) => P + i * bw + bw / 2, y = (v) => P + ((mx - v) / (mx - mn)) * (PH - 2 * P);
+  const body = Math.max(1, Math.floor(bw * 0.62)), r1 = (v) => Math.round(v);
+  const vmax = Math.max(1, ...V.filter((v) => Number.isFinite(v)));
+  let svg = "";
+  for (let i = 0; i < n; i++) {
+    const o = O?.[i], c = C[i], up = o != null ? c > o : i > 0 ? c >= C[i - 1] : true, flat = o != null && c === o;
+    const col = flat ? "var(--ink)" : up ? "var(--up)" : "var(--down)";
+    const cx = r1(x(i));
+    if (hasOHLC && o != null) {
+      svg += `<rect x="${cx}" y="${r1(y(hi(i)))}" width="2" height="${Math.max(1, r1(y(lo(i))) - r1(y(hi(i))))}" fill="var(--ink)"/>`;
+      const t = r1(y(Math.max(o, c))), b = r1(y(Math.min(o, c)));
+      svg += `<rect x="${cx + 1 - Math.floor(body / 2)}" y="${t}" width="${body}" height="${Math.max(2, b - t)}" fill="${col}" stroke="var(--ink)" stroke-width="1"/>`;
+    } else {
+      svg += `<rect x="${cx + 1 - Math.floor(body / 2)}" y="${r1(y(c)) - 1}" width="${body}" height="3" fill="${col}"/>`;
+    }
+    if (Number.isFinite(V[i])) { const vh = Math.max(1, (V[i] / vmax) * VH); svg += `<rect x="${cx + 1 - Math.floor(body / 2)}" y="${r1(PH + GAP + VH - vh)}" width="${body}" height="${r1(vh)}" fill="${col}" opacity=".55"/>`; }
+  }
+  const line = (arr) => arr.map((v, i) => (v == null ? "" : `${arr.slice(0, i).some((z) => z != null) ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`)).join("");
+  svg += `<path d="${line(m20)}" fill="none" stroke="var(--sky)" stroke-width="2" vector-effect="non-scaling-stroke"/><path d="${line(m5)}" fill="none" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>`;
+  const selFromRight = chartSel[st.code] ?? 0, si = Math.max(0, Math.min(n - 1, n - 1 - selFromRight));
+  svg += `<rect x="${r1(x(si))}" y="0" width="2" height="${H_}" fill="var(--ink)" opacity=".35"/>`;
+  const fmtP2 = (v) => (v == null ? "—" : fmt(v, v < 100 ? 2 : 1));
+  const prevC = si > 0 ? C[si - 1] : off > 0 ? e.closes[off - 1] : null, chg = prevC ? C[si] - prevC : null;
+  const info = `<div class="kinfo"><span class="num">${esc(D?.[si] ? md(D[si]) : "")}</span>
+    <span>開 <b class="num">${fmtP2(O?.[si])}</b></span><span>高 <b class="num">${fmtP2(H?.[si])}</b></span><span>低 <b class="num">${fmtP2(Lw?.[si])}</b></span><span>收 <b class="num ${cls(chg)}">${fmtP2(C[si])}</b></span>
+    <span class="${cls(chg)}">${chg != null ? (chg > 0 ? "▲" : chg < 0 ? "▼" : "") + fmt(Math.abs(chg), 2) + " " + fmtP((chg / prevC) * 100) : ""}</span>${Number.isFinite(V[si]) ? `<span>量 <b class="num">${fmt(V[si])}</b> 張</span>` : ""}</div>`;
+  const ranges = [[20, "1 月"], [60, "3 月"], [120, "6 月"]].map(([k, l]) => `<button type="button" data-krange="${k}" aria-pressed="${chartRange.n === k}">${l}</button>`).join("");
+  return `<div class="kchart">
+    <div class="khead"><div class="seg krange" role="group" aria-label="K 線期間">${ranges}</div><span class="sub"><span style="color:var(--ink)">┅</span> MA5　<span style="color:var(--sky)">━</span> MA20</span></div>
+    ${info}
+    <div class="chart"><svg class="candles" data-kcode="${esc(st.code)}" data-kn="${n}" viewBox="0 0 ${W} ${H_}" preserveAspectRatio="none" shape-rendering="crispEdges" role="img" aria-label="${esc(st.name)} 近 ${n} 日 K 線，點選可看單日開高低收">${svg}</svg></div>
+    ${hasOHLC ? "" : `<p class="sub" style="margin:0">開高低價資料補齊前，先以收盤價畫成短橫線；下一次完整更新後會變成完整 K 棒。</p>`}
+    ${tv}</div>`;
 }
 
 /* ---------- 渲染：同步面板 ---------- */
@@ -850,6 +910,14 @@ function renderClock() {
 function renderAll() { renderClock(); renderTape(); renderTrend(); renderWatch(); renderAccount(); renderSync(); }
 
 /* ---------- 事件 ---------- */
+// 點 K 線圖：選取最接近的那一根，顯示開高低收
+document.addEventListener("pointerdown", (e) => {
+  const svg = e.target.closest?.("svg.candles");
+  if (!svg) return;
+  const r = svg.getBoundingClientRect(), n = +svg.dataset.kn, code = svg.dataset.kcode;
+  const i = Math.max(0, Math.min(n - 1, Math.floor(((e.clientX - r.left) / r.width) * n)));
+  chartSel[code] = n - 1 - i; renderWatch();
+});
 document.addEventListener("click", (e) => {
   const t = e.target.closest("button,[data-toggle]");
   if (!t) return;
@@ -857,6 +925,7 @@ document.addEventListener("click", (e) => {
   if (ds.toggle) { openCode = openCode === ds.toggle ? null : ds.toggle; renderWatch(); return; }
   if (ds.trend) { trendTab = ds.trend; lsSet("st.trend", trendTab); renderTrend(); return; }
   if (ds.addwatch) { if (!S.watch.some((w) => w.code === ds.addwatch)) { S.watch.push(newStock(ds.addwatch, ds.name || ds.addwatch)); commit(); renderWatch(); renderTrend(); } return; }
+  if (ds.krange) { chartRange.n = +ds.krange; lsSet("st.krange", ds.krange); renderWatch(); return; }
   if (ds.acct) { curAcct = ds.acct; renderAccount(); return; }
   if (ds.trade) {
     const w = S.watch.find((x) => x.code === ds.code);

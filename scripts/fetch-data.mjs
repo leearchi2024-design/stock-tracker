@@ -109,14 +109,12 @@ async function backfill(store, days, today) {
     try {
       const rows = L.parseTwseHistDay(await get(`${TWSE_RWD}/afterTrading/MI_INDEX?date=${ymd(d)}&type=ALLBUT0999&response=json`, { timeout: 60000 }));
       if (rows) {
-        L.upsertDay(store, d, "c", Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, v.close])));
-        L.upsertDay(store, d, "v", Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, v.vol])));
+        L.upsertQuotes(store, d, rows);
         twFail = 0; got++;
         if (tpexOk) {
           const t = await fetchTpexHist(d);
           if (t) {
-            L.upsertDay(store, d, "c", Object.fromEntries(Object.entries(t).map(([k, v]) => [k, v.close])));
-            L.upsertDay(store, d, "v", Object.fromEntries(Object.entries(t).map(([k, v]) => [k, v.vol])));
+            L.upsertQuotes(store, d, t);
           } else if (i < 3) { tpexOk = false; log("櫃買歷史抓不到，上櫃股改為每天累積"); }
         }
         if (got <= 6) {
@@ -148,7 +146,8 @@ async function main() {
   if (FULL) {
 
   // 1. 第一次執行或手動要求時補抓歷史
-  const need = BACKFILL || (store.days.length < 20 ? 70 : 0);
+  // 歷史不足 20 天，或舊版資料沒有開高低價（K 線需要），就補抓 70 天
+  const need = BACKFILL || (store.days.length < 20 || L.ohlcDays(store) < 20 ? 70 : 0);
   if (need) {
     // 14 點前今天還沒收盤，從昨天開始往回補
     const from = now.hour >= 14 ? now.date : new Date(Date.parse(now.date + "T00:00:00Z") - 864e5).toISOString().slice(0, 10);
@@ -170,8 +169,7 @@ async function main() {
       tradeDate = fp === lastFp ? last : now.wd >= 1 && now.wd <= 5 && now.hour >= 14 ? now.date : null;
     }
     if (tradeDate) {
-      L.upsertDay(store, tradeDate, "c", Object.fromEntries(Object.entries(tw.rows).map(([k, v]) => [k, v.close])));
-      L.upsertDay(store, tradeDate, "v", Object.fromEntries(Object.entries(tw.rows).map(([k, v]) => [k, v.vol])));
+      L.upsertQuotes(store, tradeDate, tw.rows);
     }
     for (const [k, v] of Object.entries(tw.rows)) quotes.q[k] = [v.name, v.close, v.change, v.vol, null, null, null, "上市"];
     quotes.date = tradeDate || quotes.date;
@@ -184,8 +182,7 @@ async function main() {
     if (n < 200) throw new Error(`只有 ${n} 檔，資料不完整`);
     const d = tp.date || tradeDate;
     if (d) {
-      L.upsertDay(store, d, "c", Object.fromEntries(Object.entries(tp.rows).map(([k, v]) => [k, v.close])));
-      L.upsertDay(store, d, "v", Object.fromEntries(Object.entries(tp.rows).map(([k, v]) => [k, v.vol])));
+      L.upsertQuotes(store, d, tp.rows);
     }
     for (const [k, v] of Object.entries(tp.rows)) quotes.q[k] = [v.name, v.close, v.change, v.vol, null, null, null, "上櫃"];
     tradeDate = tradeDate || d;

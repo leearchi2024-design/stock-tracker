@@ -1,7 +1,7 @@
 // 純函式：解析證交所／櫃買中心／Yahoo／RSS 回傳的資料，以及歷史資料庫的增修。
 // 不連網，方便離線測試（scripts/test.mjs）。
 
-export const FIELDS = ["c", "v", "f", "t", "m"]; // 收盤價、成交量(張)、外資買賣超(股)、投信買賣超(股)、融資餘額(張)
+export const FIELDS = ["c", "o", "h", "l", "v", "f", "t", "m"]; // 收盤、開盤、最高、最低、成交量(張)、外資買賣超(股)、投信買賣超(股)、融資餘額(張)
 export const MAX_DAYS = 130;
 // 股票與 ETF：4 碼（可帶一個英文字，如特別股 2881A）或 00 開頭的 ETF（0050、00878、00679B）。
 // 排除權證（6 碼數字）與可轉債（5 碼數字）。
@@ -83,6 +83,9 @@ export function parseTwseDayAll(arr) {
     rows[code] = {
       name: String(pick(o, /^Name$/i, /證券名稱/) ?? "").trim(),
       close,
+      open: num(pick(o, /OpeningPrice/i, /開盤價/)),
+      high: num(pick(o, /HighestPrice/i, /最高價/)),
+      low: num(pick(o, /LowestPrice/i, /最低價/)),
       change: num(pick(o, /^Change$/i, /漲跌價差/)),
       vol: lots(num(pick(o, /TradeVolume/i, /成交股數/))),
     };
@@ -103,6 +106,9 @@ export function parseTpexClose(arr) {
     rows[code] = {
       name: String(pick(o, /CompanyName/i, /名稱/) ?? "").trim(),
       close,
+      open: num(pick(o, /^Open$/i, /開盤/)),
+      high: num(pick(o, /^High$/i, /最高/)),
+      low: num(pick(o, /^Low$/i, /最低/)),
       change: num(pick(o, /^Change$/i, /漲跌/)),
       vol: lots(num(pick(o, /TradingShares/i, /TradeVolume/i, /成交股數/))),
     };
@@ -122,7 +128,7 @@ export function parseTwseHistDay(j) {
     const code = String(o["證券代號"] ?? "").trim();
     const close = num(o["收盤價"]);
     if (!CODE_RE.test(code) || close == null) continue;
-    rows[code] = { close, vol: lots(num(o["成交股數"])) };
+    rows[code] = { close, open: num(o["開盤價"]), high: num(o["最高價"]), low: num(o["最低價"]), vol: lots(num(o["成交股數"])) };
   }
   return rows;
 }
@@ -135,7 +141,7 @@ export function parseTpexHistDay(j) {
     for (const r of j.aaData) {
       const code = String(r[0] ?? "").trim();
       const close = num(r[2]);
-      if (CODE_RE.test(code) && close != null) rows[code] = { close, vol: lots(num(r[7])) };
+      if (CODE_RE.test(code) && close != null) rows[code] = { close, open: num(r[4]), high: num(r[5]), low: num(r[6]), vol: lots(num(r[7])) };
     }
     return Object.keys(rows).length ? rows : null;
   }
@@ -144,7 +150,7 @@ export function parseTpexHistDay(j) {
   for (const o of rowsOf(t)) {
     const code = String(pick(o, /代號/) ?? "").trim();
     const close = num(pick(o, /收盤/));
-    if (CODE_RE.test(code) && close != null) rows[code] = { close, vol: lots(num(pick(o, /成交股數/))) };
+    if (CODE_RE.test(code) && close != null) rows[code] = { close, open: num(pick(o, /開盤/)), high: num(pick(o, /最高/)), low: num(pick(o, /最低/)), vol: lots(num(pick(o, /成交股數/))) };
   }
   return Object.keys(rows).length ? rows : null;
 }
@@ -469,4 +475,19 @@ export function storeCodes(store) {
   const set = new Set();
   for (const f of FIELDS) for (const c of Object.keys(store[f])) set.add(c);
   return [...set];
+}
+
+/** 把一天的 {code: {close, open, high, low, vol}} 寫進歷史資料庫的各欄。 */
+export function upsertQuotes(store, date, rows) {
+  const col = (k) => Object.fromEntries(Object.entries(rows).map(([c, v]) => [c, v[k]]));
+  upsertDay(store, date, "c", col("close"));
+  upsertDay(store, date, "o", col("open"));
+  upsertDay(store, date, "h", col("high"));
+  upsertDay(store, date, "l", col("low"));
+  upsertDay(store, date, "v", col("vol"));
+}
+
+/** 有開高低價的交易日數（用台積電判斷，決定是否需要補抓）。 */
+export function ohlcDays(store) {
+  return (store.h["2330"] || []).filter((x) => Number.isFinite(x)).length;
 }

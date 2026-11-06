@@ -20,12 +20,12 @@ t("數字與日期解析", () => {
 
 t("上市 STOCK_DAY_ALL", () => {
   const r = L.parseTwseDayAll([
-    { Date: "1151104", Code: "2330", Name: "台積電", TradeVolume: "45,123,000", ClosingPrice: "2260.00", Change: "-35.0000" },
+    { Date: "1151104", Code: "2330", Name: "台積電", TradeVolume: "45,123,000", OpeningPrice: "2,300.00", HighestPrice: "2310.00", LowestPrice: "2245.00", ClosingPrice: "2260.00", Change: "-35.0000" },
     { Date: "1151104", Code: "0050", Name: "元大台灣50", TradeVolume: "1000", ClosingPrice: "", Change: "0" },
     { Date: "1151104", Code: "03xxxP", Name: "權證", TradeVolume: "1", ClosingPrice: "1", Change: "0" },
   ]);
   assert.equal(r.date, "2026-11-04");
-  assert.deepEqual(r.rows["2330"], { name: "台積電", close: 2260, change: -35, vol: 45123 });
+  assert.deepEqual(r.rows["2330"], { name: "台積電", close: 2260, open: 2300, high: 2310, low: 2245, change: -35, vol: 45123 });
   assert.equal(r.rows["0050"], undefined);
   assert.equal(Object.keys(r.rows).length, 1);
 });
@@ -34,7 +34,7 @@ t("上櫃收盤（排除權證、可轉債）", () => {
   const row = (code, close) => ({ Date: "1151104", SecuritiesCompanyCode: code, CompanyName: "x", Close: close, Change: "+3.00", TradingShares: "1,234,000" });
   const r = L.parseTpexClose([{ ...row("6488", "512.00"), CompanyName: "環球晶" }, row("00679B", "28.5"), row("64881", "105"), row("703456", "1.2"), row("2881A", "60")]);
   assert.equal(r.date, "2026-11-04");
-  assert.deepEqual(r.rows["6488"], { name: "環球晶", close: 512, change: 3, vol: 1234 });
+  assert.deepEqual(r.rows["6488"], { name: "環球晶", close: 512, open: null, high: null, low: null, change: 3, vol: 1234 });
   assert.deepEqual(Object.keys(r.rows).sort(), ["00679B", "2881A", "6488"]);
   for (const c of ["2330", "0050", "00878", "006208", "00679B", "2881A"]) assert.ok(L.CODE_RE.test(c), c);
   for (const c of ["64881", "703456", "03xxxP", "12"]) assert.ok(!L.CODE_RE.test(c), c);
@@ -44,12 +44,16 @@ t("上櫃收盤（排除權證、可轉債）", () => {
 
 t("rwd 表格（新舊格式）與歷史收盤", () => {
   const neu = { stat: "OK", tables: [{ title: "價格指數", fields: ["指數", "收盤指數"], data: [["加權", "1"]] }, { title: "每日收盤行情", fields: ["證券代號", "證券名稱", "成交股數", "成交筆數", "成交金額", "開盤價", "最高價", "最低價", "收盤價"], data: [["2330", "台積電", "45,000,000", "1", "1", "2300", "2310", "2250", "2,260.00"], ["2317", "鴻海", "--", "1", "1", "1", "1", "1", "--"]] }] };
-  assert.deepEqual(L.parseTwseHistDay(neu), { "2330": { close: 2260, vol: 45000 } });
+  assert.deepEqual(L.parseTwseHistDay(neu), { "2330": { close: 2260, open: 2300, high: 2310, low: 2250, vol: 45000 } });
   const old = { stat: "OK", fields9: ["證券代號", "證券名稱", "成交股數", "收盤價"], data9: [["2454", "聯發科", "3,000,000", "3715"]] };
-  assert.deepEqual(L.parseTwseHistDay(old), { "2454": { close: 3715, vol: 3000 } });
+  assert.deepEqual(L.parseTwseHistDay(old), { "2454": { close: 3715, open: null, high: null, low: null, vol: 3000 } });
   assert.equal(L.parseTwseHistDay({ stat: "很抱歉，沒有符合條件的資料!" }), null);
   const tp = L.parseTpexHistDay({ aaData: [["6488", "環球晶", "512.00", "+3", "509", "515", "508", "1,234,000"]] });
-  assert.deepEqual(tp, { "6488": { close: 512, vol: 1234 } });
+  assert.deepEqual(tp, { "6488": { close: 512, open: 509, high: 515, low: 508, vol: 1234 } });
+  const st = L.emptyStore();
+  L.upsertQuotes(st, "2026-11-04", { "2330": { close: 2260, open: 2300, high: 2310, low: 2250, vol: 45000 } });
+  assert.deepEqual([st.c["2330"][0], st.o["2330"][0], st.h["2330"][0], st.l["2330"][0], st.v["2330"][0]], [2260, 2300, 2310, 2250, 45000]);
+  assert.equal(L.ohlcDays(st), 1);
 });
 
 t("三大法人 T86", () => {
