@@ -524,15 +524,22 @@ export function parseMis(j) {
   for (const o of Array.isArray(j?.msgArray) ? j.msgArray : []) {
     const code = String(o.c ?? "").trim();
     if (!code) continue;
-    const prev = num(o.y);
-    let last = num(o.z);
-    if (last == null) last = num(String(o.b ?? "").split("_")[0]); // 這一筆沒有成交時，用最佳買價
-    if (last == null) last = num(o.pz);
+    const pos = (v) => { const x = num(v); return x != null && x > 0 ? x : null; };
+    const prev = pos(o.y);
+    const up = pos(o.u), dn = pos(o.w);
+    const bids = String(o.b ?? "").split("_").filter(Boolean).map(num), asks = String(o.a ?? "").split("_").filter(Boolean).map(num);
+    // 漲停／跌停鎖住時常沒有新成交（z 為 "-"），委託簿第一檔是「市價單」顯示 0，不能當成價格
+    let last = pos(o.z);
+    if (last == null && bids[0] === 0 && up) last = up;
+    if (last == null && asks[0] === 0 && dn) last = dn;
+    if (last == null) last = bids.find((x) => x > 0) ?? asks.find((x) => x > 0) ?? pos(o.pz) ?? null;
     if (last == null || prev == null) continue;
+    const limit = up && last >= up ? 1 : dn && last <= dn ? -1 : 0;
     const d = toISODate(o.d);
     if (d && (!date || d > date)) date = d;
     if (o.t && (!at || o.t > at)) at = String(o.t);
-    rows[code] = { last, prev, open: num(o.o), high: num(o.h), low: num(o.l), vol: num(o.v), time: String(o.t || "") };
+    rows[code] = { last, prev, open: pos(o.o), high: pos(o.h), low: pos(o.l), vol: num(o.v), time: String(o.t || "") };
+    if (limit) rows[code].limit = limit;
   }
   return { date, time: at, rows };
 }

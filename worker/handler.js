@@ -51,7 +51,7 @@ async function handleQuote(url, ctx) {
       if (r.date && (!date || r.date > date)) date = r.date;
       if (r.time && (!time || r.time > time)) time = r.time;
     }
-    return { at: new Date().toISOString(), date, time, q: Object.fromEntries(Object.entries(rows).map(([c, v]) => [c, [v.last, v.prev, v.open, v.high, v.low, v.vol, v.time]])) };
+    return { at: new Date().toISOString(), date, time, q: Object.fromEntries(Object.entries(rows).map(([c, v]) => [c, [v.last, v.prev, v.open, v.high, v.low, v.vol, v.time, v.limit || 0]])) };
   });
 }
 

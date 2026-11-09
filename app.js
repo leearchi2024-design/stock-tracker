@@ -137,7 +137,7 @@ function signIn() {
 /* ---------- 盤中報價（今天的才算數） ---------- */
 // 先用即時轉送（Worker，約 10 秒一次），沒有的話用 GitHub 每 5 分鐘的盤中資料
 const liveSrc = (code) => [AUTO.live, AUTO.intraday].find((it) => it && it.date === todayStr() && (code == null ? it.time : it.q?.[code])) || null;
-const liveQ = (code) => liveSrc(code)?.q?.[code] || null;
+const liveQ = (code) => { const q = liveSrc(code)?.q?.[code]; return q && q[0] > 0 && q[1] > 0 ? q : null; };
 const liveTime = () => { const it = liveSrc(); return it ? it.time.slice(0, 5) : null; };
 const isRealtime = () => !!(AUTO.live && AUTO.live.date === todayStr() && Date.now() - Date.parse(AUTO.live.at) < 90000);
 
@@ -174,7 +174,7 @@ function eff(st) {
   else if (lq) { e.price = lq[0]; e.src.price = "intraday"; }
   else if (q && q[1] != null) { e.price = q[1]; e.src.price = "auto"; }
   else { e.price = numOr(st.price); e.src.price = e.price != null ? "manual" : null; }
-  if (lq) { e.prev = lq[1]; e.chg = +(e.price - lq[1]).toFixed(2); }
+  if (lq) { e.prev = lq[1]; e.chg = +(e.price - lq[1]).toFixed(2); e.limit = live == null ? lq[7] || 0 : 0; }
   else {
     e.chg = q && q[1] != null && q[2] != null ? q[2] : null;
     e.prev = e.chg != null ? +(q[1] - q[2]).toFixed(2) : numOr(st.prev);
@@ -189,9 +189,8 @@ function eff(st) {
   if (hc.length && hc.length >= mc.length) {
     e.closes = hc; e.vols = hv.every((x) => Number.isFinite(x)) ? hv : []; e.src.closes = "auto"; e.histFrom = h.d?.[h.c.findIndex((x) => Number.isFinite(x))];
     e.opens = ho; e.highs = hh; e.lows = hl; e.dates = hd; e.rawVols = hv;
-    const it = AUTO.intraday;
-    if (lq && it.date > (hd[hd.length - 1] || "")) {
-      e.closes = [...hc, lq[0]]; e.opens = [...ho, lq[2]]; e.highs = [...hh, lq[3]]; e.lows = [...hl, lq[4]]; e.dates = [...hd, it.date]; e.rawVols = [...hv, lq[5]];
+    if (lq && todayStr() > (hd[hd.length - 1] || "")) {
+      e.closes = [...hc, lq[0]]; e.opens = [...ho, lq[2] || lq[0]]; e.highs = [...hh, lq[3] || lq[0]]; e.lows = [...hl, lq[4] || lq[0]]; e.dates = [...hd, todayStr()]; e.rawVols = [...hv, lq[5]];
       e.vols = e.vols.length ? [...e.vols, lq[5]] : []; e.liveBar = true;
     }
   } else { e.closes = mc; e.vols = []; e.src.closes = mc.length ? "manual" : null; e.opens = e.highs = e.lows = null; e.dates = null; e.rawVols = null; }
@@ -758,7 +757,7 @@ function renderWatch() {
     return `<div class="stock${open ? " open" : ""}">
       <button class="head" type="button" data-toggle="${esc(st.code)}" aria-expanded="${open}">
         <div class="nm"><span>${esc(st.code)}</span><b>${esc(st.name)}</b>${a.pos ? ` <span class="chip info">持有 ${fmt(a.pos.qty)} 股</span>` : ""}</div>
-        <div class="px"><b class="${cls(e.chg)}">${e.price != null ? fmt(e.price, e.price < 100 ? 2 : 1) : "—"}</b><small class="${cls(e.chg)}">${e.chg != null ? (e.chg > 0 ? "▲" : e.chg < 0 ? "▼" : "") + fmt(Math.abs(e.chg), 2) + "　" + fmtP(pct) : e.src.price === "manual" ? "參考價" : ""}</small></div>
+        <div class="px"><b class="${cls(e.chg)}">${e.price != null ? fmt(e.price, e.price < 100 ? 2 : 1) : "—"}</b><small class="${cls(e.chg)}">${e.chg != null ? (e.chg > 0 ? "▲" : e.chg < 0 ? "▼" : "") + fmt(Math.abs(e.chg), 2) + "　" + fmtP(pct) : e.src.price === "manual" ? "參考價" : ""}</small>${e.limit ? `<span class="stamp limit ${e.limit > 0 ? "bull" : "bear"}">${e.limit > 0 ? "漲停" : "跌停"}</span>` : ""}</div>
         <div class="sig"><span class="chip ${sigClass(a)}">${esc(sigLabel(a))}</span>${meterHtml(a.score)}</div>
       </button>
       ${open ? detailHtml(st, a) : ""}

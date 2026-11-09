@@ -148,6 +148,9 @@ t("盤中報價（證交所基本市況報導）", () => {
     { c: "2317", n: "鴻海", z: "-", b: "241.5000_241.0000_", y: "240.0000", o: "239.0000", h: "242.0000", l: "238.5000", v: "40111", t: "12:30:00", d: "20261106" },
     { c: "t00", n: "發行量加權股價指數", z: "41800.12", y: "41574.00", t: "12:30:00", d: "20261106" },
     { c: "9999", z: "-", y: "-" },
+    { c: "2344", n: "華邦電", z: "-", b: "0.0000_132.5000_132.0000_", a: "-", u: "132.5000", w: "108.5000", y: "120.5000", o: "125.0000", h: "132.5000", l: "124.5000", v: "88000", t: "10:40:00", d: "20261106" },
+    { c: "2408", n: "南亞科", z: "-", b: "-", a: "0.0000_80.0000_", u: "97.9000", w: "80.1000", y: "89.0000", t: "10:40:00", d: "20261106" },
+    { c: "2337", z: "0.0000", b: "0.0000_", a: "0.0000_", y: "30.0000" },
   ] };
   const r = L.parseMis(j);
   assert.equal(r.date, "2026-11-06");
@@ -156,6 +159,10 @@ t("盤中報價（證交所基本市況報導）", () => {
   assert.equal(r.rows["2317"].last, 241.5);
   assert.equal(r.rows["t00"].last, 41800.12);
   assert.equal(r.rows["9999"], undefined);
+  assert.equal(r.rows["2344"].last, 132.5); assert.equal(r.rows["2344"].limit, 1);
+  assert.equal(r.rows["2408"].last, 80.1); assert.equal(r.rows["2408"].limit, -1);
+  assert.equal(r.rows["2337"], undefined);
+  assert.equal(r.rows["2330"].limit, undefined);
   assert.equal(L.isMarketHours({ wd: 5, hour: 12, minute: 30 }), true);
   assert.equal(L.isMarketHours({ wd: 5, hour: 14, minute: 0 }), false);
   assert.equal(L.isMarketHours({ wd: 6, hour: 10, minute: 0 }), false);

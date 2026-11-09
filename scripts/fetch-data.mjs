@@ -312,7 +312,7 @@ async function main() {
       }
       const n = Object.keys(rows).length;
       if (!n) throw new Error("沒有取得任何盤中報價（證交所可能擋下了這台主機）");
-      intraday = { at: new Date().toISOString(), date: date || now.date, time, q: Object.fromEntries(Object.entries(rows).map(([c, v]) => [c, [v.last, v.prev, v.open, v.high, v.low, v.vol, v.time]])) };
+      intraday = { at: new Date().toISOString(), date: date || now.date, time, q: Object.fromEntries(Object.entries(rows).map(([c, v]) => [c, [v.last, v.prev, v.open, v.high, v.low, v.vol, v.time, v.limit || 0]])) };
       ok("intraday", `${n} 檔・${time || ""}`);
     } catch (e) { fail("intraday", e); }
   }
