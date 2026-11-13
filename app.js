@@ -814,14 +814,21 @@ function renderWatch() {
     const open = openCode === st.code;
     return `<div class="stock${open ? " open" : ""}">
       <button class="head" type="button" data-toggle="${esc(st.code)}" aria-expanded="${open}">
-        <div class="nm"><span>${esc(st.code)}</span><b>${esc(st.name)}</b>${e.us ? ` <span class="chip">美股</span>` : ""}${a.pos ? ` <span class="chip info">持有 ${fmt(a.pos.qty)} 股</span>` : ""}</div>
+        <div class="nm"><span>${esc(st.code)}</span><b>${esc(st.name)}</b>${e.us ? ` <span class="chip">美股</span>` : ""}</div>
         <div class="px"><b class="${cls(e.chg)}">${e.price != null ? (e.us ? "<i class=\"cur\">US$</i>" + fmt(e.price, 2) : fmt(e.price, e.price < 100 ? 2 : 1)) : "—"}</b><small class="${cls(e.chg)}">${e.chg != null ? (e.chg > 0 ? "▲" : e.chg < 0 ? "▼" : "") + fmt(Math.abs(e.chg), 2) + "　" + fmtP(pct) : e.src.price === "manual" ? "參考價" : ""}</small>${e.limit ? `<span class="stamp limit ${e.limit > 0 ? "bull" : "bear"}">${e.limit > 0 ? "漲停" : "跌停"}</span>` : ""}</div>
         <div class="sig"><span class="chip ${sigClass(a)}">${esc(sigLabel(a))}</span>${meterHtml(a.score)}</div>
+        ${posLine(a.pos)}
       </button>
       ${open ? detailHtml(st, a) : ""}
     </div>`;
   }).join("");
   $("#codeList").innerHTML = S.watch.map((w) => `<option value="${esc(w.code)}">${esc(w.name)}</option>`).join("") + Object.entries(US_NAMES).map(([c, n]) => `<option value="${esc(c)}">${esc(n)}（美股）</option>`).join("");
+}
+/** 角色卡上的持股列：持有股數、均價、目前損益（新台幣，美股含匯率） */
+function posLine(p) {
+  if (!p) return "";
+  const pl = p.mv != null ? p.mv - p.cost : null, pp = pl != null && p.cost ? (pl / p.cost) * 100 : null;
+  return `<div class="posline"><span class="tag">持有</span><span>${fmt(p.qty)} 股・均價 <b class="num">${p.us ? usd(p.avg) : fmt(p.avg, 2)}</b></span><span class="pl ${cls(pl)}">目前損益 <b class="num">${pl != null ? (pl > 0 ? "▲" : pl < 0 ? "▼" : "") + fmt(Math.abs(pl)) + " 元　" + fmtP(pp) : "—"}</b></span></div>`;
 }
 function autoChip(e, k) { return e.src[k] === "auto" ? ` <span class="chip auto">自動</span>` : ""; }
 function detailHtml(st, a) {
@@ -1009,7 +1016,7 @@ function renderAccount() {
       return `<div class="item"><div class="top">${esc(h.name || h.code)}<span>${esc(h.code)}</span></div>
         <span class="qty">× ${fmt(h.qty)} 股${h.us ? ` <span class="chip info">美股</span>` : ""}</span>
         <span class="sub">均價 <span class="num">${h.us ? usd(h.avg) : fmt(h.avg, 2)}</span>・現價 <span class="num">${h.px != null ? (h.us ? usd(h.px) : fmt(h.px, 2)) : "—"}</span>${h.us ? `<br>匯率 <span class="num">${fmt(h.rate, 2)}</span>・市值 <span class="num">${h.mv != null ? fmt(h.mv) : "—"}</span> 元` : ""}</span>
-        <span class="pl ${cls(pl)}">${pl != null ? arrow(pl) + fmt(Math.abs(pl)) + "<br>" + fmtP(pp) : h.us ? `<small class="sub">沒有現價<br>（見下方說明）</small>` : "—"}</span>
+        <span class="pl ${cls(pl)}"><small class="lab">目前損益</small>${pl != null ? arrow(pl) + fmt(Math.abs(pl)) + ` <small>元</small><br>` + fmtP(pp) : `<small class="sub">${h.us ? "沒有現價（見下方說明）" : "還沒有現價"}</small>`}</span>
         ${a ? `<span><span class="chip ${sigClass(a)}">${esc(sigLabel(a))}</span></span>` : h.us ? `<span><button type="button" class="ghost" data-trade="sell" data-code="${esc(h.code)}">賣出</button></span>` : `<span class="sub">未在觀察清單</span>`}</div>`;
     }).join("")}${'<div class="item slot" aria-hidden="true"></div>'.repeat(slots)}</div>`
     : `<div class="empty"><span>道具欄是空的。先在「資金存入」放入資金，再用「下單紀錄」記下第一筆買入。</span></div>`;
