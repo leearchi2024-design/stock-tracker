@@ -3,7 +3,7 @@
 const ALLOWED_ORIGINS = ["https://leearchi2024-design.github.io"];
 const UA_HEADERS = { "User-Agent": "Mozilla/5.0 (compatible; stock-tracker-live/1.0)", Accept: "*/*" };
 const SYMBOL_RE = /^(tse|otc):(\d{4}[A-Z]?|00\d{2,4}[A-Z]?|t00)$/;
-const NAME_RE = /^[0-9A-Z]{4,6}:[^\s"'<>&]{1,12}$/u;
+const NAME_RE = /^(?:[0-9A-Z]{4,6}|[A-Z]{1,5}(?:[.-][A-Z]{1,2})?):[^\s"'<>&]{1,12}$/u;
 
 function corsHeaders(origin) {
   return { "Access-Control-Allow-Origin": origin, Vary: "Origin", "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Max-Age": "86400" };
@@ -68,6 +68,16 @@ async function handleUS(url, ctx) {
   return { at: new Date().toISOString(), fx: fx?.close ?? null, q };
 }
 
+/** /ushist?s=NVDA → 單一美股 6 個月日 K（不在熱門清單的美股用，快取 1 小時） */
+async function handleUSHist(url, ctx) {
+  const sym = (url.searchParams.get("s") || "").trim().toUpperCase();
+  if (!US_SYM_RE.test(sym)) return { error: "代號格式不對" };
+  return cachedJson("ush:" + sym, 3600, ctx, async () => {
+    const j = await upstream(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym.replace(".", "-"))}?range=6mo&interval=1d`);
+    return { sym, name: j?.chart?.result?.[0]?.meta?.shortName || null, h: parseYahooOHLC(j), q: parseYahooChart(j) };
+  });
+}
+
 const gnews = (q) => "https://news.google.com/rss/search?q=" + encodeURIComponent(q) + "&hl=zh-TW&gl=TW&ceid=TW:zh-Hant";
 async function feed(url, src, hints, ctx) {
   return cachedJson("f:" + url, 120, ctx, async () => {
@@ -91,7 +101,7 @@ async function handleNews(url, ctx) {
   }
   const lists = await Promise.all(jobs);
   const items = mergeNews(lists, { limit: 160 }).map((n) => {
-    const codes = watch.filter((w) => n.t.includes(w.name) || n.t.includes(w.code)).map((w) => w.code);
+    const codes = watch.filter((w) => (w.name.length >= 2 && n.t.includes(w.name)) || (/^\d/.test(w.code) ? n.t.includes(w.code) : w.code.length >= 3 && new RegExp(`(?<![A-Za-z])${w.code.replace(".", "\\.")}(?![A-Za-z])`).test(n.t))).map((w) => w.code);
     return codes.length ? { ...n, codes } : n;
   });
   return { at: new Date().toISOString(), updatedAt: new Date().toISOString(), items };
@@ -110,6 +120,7 @@ export default {
     try {
       if (url.pathname === "/quote") return reply(await handleQuote(url, ctx), 200, origin);
       if (url.pathname === "/us") return reply(await handleUS(url, ctx), 200, origin);
+      if (url.pathname === "/ushist") return reply(await handleUSHist(url, ctx), 200, origin);
       if (url.pathname === "/news") return reply(await handleNews(url, ctx), 200, origin);
       return reply({ error: "找不到這個功能" }, 404, origin);
     } catch (e) {

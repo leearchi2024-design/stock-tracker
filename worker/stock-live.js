@@ -1,6 +1,6 @@
 // 股票追蹤器・即時報價與新聞（Cloudflare Worker）
 // 這個檔案由 scripts/build-worker.mjs 自動產生，請改 worker/handler.js 或 scripts/lib.mjs 後重新產生。
-// 產生時間：2026-11-13T06:07:23.146Z
+// 產生時間：2026-11-13T07:40:16.316Z
 
 // 純函式：解析證交所／櫃買中心／Yahoo／RSS 回傳的資料，以及歷史資料庫的增修。
 // 不連網，方便離線測試（scripts/test.mjs）。
@@ -412,6 +412,26 @@ function parseYahooSeries(j) {
   return d.length ? { d, c } : null;
 }
 
+/** Yahoo 日 K → 美股歷史 {d, c, o, h, l, v}（和台股的個股檔同格式，APP 可以直接畫 K 線、算指標） */
+function parseYahooOHLC(j) {
+  const r = j?.chart?.result?.[0];
+  const ts = r?.timestamp, q = r?.indicators?.quote?.[0];
+  if (!Array.isArray(ts) || !q || !Array.isArray(q.close)) return null;
+  const tz = r?.meta?.exchangeTimezoneName || "America/New_York";
+  const f = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" });
+  const R = (x) => (Number.isFinite(x) ? Math.round(x * 100) / 100 : null);
+  const out = { d: [], c: [], o: [], h: [], l: [], v: [] };
+  ts.forEach((t, i) => {
+    if (!Number.isFinite(q.close[i])) return;
+    const d = f.format(new Date(t * 1000));
+    if (out.d[out.d.length - 1] === d) out.d.pop(), out.c.pop(), out.o.pop(), out.h.pop(), out.l.pop(), out.v.pop();
+    out.d.push(d); out.c.push(R(q.close[i])); out.o.push(R(q.open?.[i])); out.h.push(R(q.high?.[i])); out.l.push(R(q.low?.[i])); out.v.push(Number.isFinite(q.volume?.[i]) ? q.volume[i] : null);
+  });
+  return out.d.length ? out : null;
+}
+/** 美股代號 → 檔名（BRK.B → BRK-B） */
+const usFile = (sym) => String(sym).replace(".", "-");
+
 /** 歷史資料庫最後一個有資料的交易日，外資、投信買賣超前 10 名（張）。 */
 function instiRanking(store, names = {}, n = 10) {
   const top = {};
@@ -563,7 +583,7 @@ function isMarketHours(now) {
 const ALLOWED_ORIGINS = ["https://leearchi2024-design.github.io"];
 const UA_HEADERS = { "User-Agent": "Mozilla/5.0 (compatible; stock-tracker-live/1.0)", Accept: "*/*" };
 const SYMBOL_RE = /^(tse|otc):(\d{4}[A-Z]?|00\d{2,4}[A-Z]?|t00)$/;
-const NAME_RE = /^[0-9A-Z]{4,6}:[^\s"'<>&]{1,12}$/u;
+const NAME_RE = /^(?:[0-9A-Z]{4,6}|[A-Z]{1,5}(?:[.-][A-Z]{1,2})?):[^\s"'<>&]{1,12}$/u;
 
 function corsHeaders(origin) {
   return { "Access-Control-Allow-Origin": origin, Vary: "Origin", "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Max-Age": "86400" };
@@ -628,6 +648,16 @@ async function handleUS(url, ctx) {
   return { at: new Date().toISOString(), fx: fx?.close ?? null, q };
 }
 
+/** /ushist?s=NVDA → 單一美股 6 個月日 K（不在熱門清單的美股用，快取 1 小時） */
+async function handleUSHist(url, ctx) {
+  const sym = (url.searchParams.get("s") || "").trim().toUpperCase();
+  if (!US_SYM_RE.test(sym)) return { error: "代號格式不對" };
+  return cachedJson("ush:" + sym, 3600, ctx, async () => {
+    const j = await upstream(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym.replace(".", "-"))}?range=6mo&interval=1d`);
+    return { sym, name: j?.chart?.result?.[0]?.meta?.shortName || null, h: parseYahooOHLC(j), q: parseYahooChart(j) };
+  });
+}
+
 const gnews = (q) => "https://news.google.com/rss/search?q=" + encodeURIComponent(q) + "&hl=zh-TW&gl=TW&ceid=TW:zh-Hant";
 async function feed(url, src, hints, ctx) {
   return cachedJson("f:" + url, 120, ctx, async () => {
@@ -651,7 +681,7 @@ async function handleNews(url, ctx) {
   }
   const lists = await Promise.all(jobs);
   const items = mergeNews(lists, { limit: 160 }).map((n) => {
-    const codes = watch.filter((w) => n.t.includes(w.name) || n.t.includes(w.code)).map((w) => w.code);
+    const codes = watch.filter((w) => (w.name.length >= 2 && n.t.includes(w.name)) || (/^\d/.test(w.code) ? n.t.includes(w.code) : w.code.length >= 3 && new RegExp(`(?<![A-Za-z])${w.code.replace(".", "\\.")}(?![A-Za-z])`).test(n.t))).map((w) => w.code);
     return codes.length ? { ...n, codes } : n;
   });
   return { at: new Date().toISOString(), updatedAt: new Date().toISOString(), items };
@@ -670,6 +700,7 @@ export default {
     try {
       if (url.pathname === "/quote") return reply(await handleQuote(url, ctx), 200, origin);
       if (url.pathname === "/us") return reply(await handleUS(url, ctx), 200, origin);
+      if (url.pathname === "/ushist") return reply(await handleUSHist(url, ctx), 200, origin);
       if (url.pathname === "/news") return reply(await handleNews(url, ctx), 200, origin);
       return reply({ error: "找不到這個功能" }, 404, origin);
     } catch (e) {

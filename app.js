@@ -28,7 +28,7 @@ const mdhm = (iso) => { if (!iso) return "—"; const t = tpeParts(new Date(iso)
 const md = (iso) => (iso ? `${+iso.slice(5, 7)}/${+iso.slice(8, 10)}` : "—");
 
 /* ---------- 自動資料（GitHub Actions 每天產生） ---------- */
-const AUTO = { market: null, news: null, quotes: null, revenue: null, status: null, intraday: null, live: null, liveNews: null, liveUS: null, hist: {}, loadedAt: 0 };
+const AUTO = { market: null, news: null, quotes: null, revenue: null, status: null, intraday: null, live: null, liveNews: null, liveUS: null, usHist: null, usExtra: {}, hist: {}, loadedAt: 0 };
 const bust = () => Math.floor(Date.now() / 60000);
 async function getJson(p) {
   const r = await fetch(`${p}?t=${bust()}`, { cache: "no-store" });
@@ -47,10 +47,25 @@ async function loadAuto() {
   renderAll();
 }
 async function loadHist(codes) {
-  await Promise.all(codes.filter((c) => CODE_RE.test(c) && !(c in AUTO.hist)).map(async (c) => {
-    AUTO.hist[c] = null;
-    try { AUTO.hist[c] = await getJson(`data/h/${c}.json`); } catch {}
-  }));
+  const us = codes.filter((c) => isUS(c) && !(c in AUTO.hist));
+  if (us.length && !AUTO.usHist) { try { AUTO.usHist = await getJson("data/ushist.json"); } catch { AUTO.usHist = { h: {} }; } }
+  const api = String(window.STOCK_APP_CONFIG?.liveApi || "").replace(/\/+$/, "");
+  await Promise.all([
+    ...codes.filter((c) => CODE_RE.test(c) && !(c in AUTO.hist)).map(async (c) => {
+      AUTO.hist[c] = null;
+      try { AUTO.hist[c] = await getJson(`data/h/${c}.json`); } catch {}
+    }),
+    // 美股：熱門清單每天由 GitHub 抓；其他代號透過即時轉送（Worker）向 Yahoo 抓 6 個月日 K
+    ...us.map(async (c) => {
+      AUTO.hist[c] = AUTO.usHist?.h?.[c] || null;
+      if (AUTO.hist[c] || !/^https:\/\/[a-z0-9.-]+\.workers\.dev$/i.test(api)) return;
+      try {
+        const r = await fetch(`${api}/ushist?s=${encodeURIComponent(c)}`, { cache: "no-store" });
+        const j = r.ok ? await r.json() : null;
+        if (j?.h) { AUTO.hist[c] = j.h; if (j.q) AUTO.usExtra[c] = j.q; }
+      } catch {}
+    }),
+  ]);
 }
 
 /* ---------- 我的資料：本機＋Google 雲端 ---------- */
@@ -165,6 +180,7 @@ const hasNews = () => !!(AUTO.news || AUTO.liveNews);
 
 /* ---------- 每檔股票的有效數據（自動優先，缺的才用手動） ---------- */
 function eff(st) {
+  if (isUS(st.code)) return effUS(st);
   const q = AUTO.quotes?.q?.[st.code];
   const h = AUTO.hist[st.code];
   const rv = AUTO.revenue?.r?.[st.code];
@@ -213,13 +229,40 @@ function eff(st) {
   e.eps = numOr(st.f?.eps);
   return e;
 }
+/** 美股：價格以美元計；歷史日 K 來自 Yahoo；沒有法人、融資、月營收（可手動填 EPS、本益比） */
+function effUS(st) {
+  const h = AUTO.hist[st.code], uq = usQuote(st.code);
+  const e = { src: {}, us: true };
+  const live = numOr(st.livePrice);
+  if (live != null) { e.price = live; e.src.price = "manual"; }
+  else if (uq?.close != null) { e.price = uq.close; e.src.price = "auto"; }
+  else { const c = h?.c?.filter(Number.isFinite); e.price = c?.length ? c[c.length - 1] : numOr(st.price); e.src.price = e.price != null ? (c?.length ? "auto" : "manual") : null; }
+  if (uq?.chg != null && live == null) { e.chg = uq.chg; e.prev = +(uq.close - uq.chg).toFixed(4); }
+  else { e.prev = numOr(st.prev); e.chg = e.price != null && e.prev != null ? e.price - e.prev : null; }
+  const hc = [], hv = [], ho = [], hh = [], hl = [], hd = [];
+  if (h && Array.isArray(h.c)) h.c.forEach((c, i) => { if (Number.isFinite(c)) { hc.push(c); hv.push(h.v?.[i] ?? null); ho.push(h.o?.[i] ?? null); hh.push(h.h?.[i] ?? null); hl.push(h.l?.[i] ?? null); hd.push(h.d?.[i] || ""); } });
+  const mc = st.closes || [];
+  if (hc.length && hc.length >= mc.length) {
+    e.closes = hc; e.vols = hv.every((x) => Number.isFinite(x)) ? hv : []; e.src.closes = "auto"; e.histFrom = hd[0];
+    e.opens = ho; e.highs = hh; e.lows = hl; e.dates = hd; e.rawVols = hv;
+    const last = hd[hd.length - 1] || "";
+    if (uq?.date && uq.close != null) {
+      if (uq.date > last) { e.closes = [...hc, uq.close]; e.opens = [...ho, uq.close]; e.highs = [...hh, uq.close]; e.lows = [...hl, uq.close]; e.dates = [...hd, uq.date]; e.rawVols = [...hv, null]; e.vols = []; e.liveBar = true; }
+      else if (uq.date === last) { e.closes = [...hc.slice(0, -1), uq.close]; }
+    }
+  } else { e.closes = mc; e.vols = []; e.src.closes = mc.length ? "manual" : null; e.opens = e.highs = e.lows = null; e.dates = null; e.rawVols = null; }
+  e.foreign = e.trust = e.margin = e.yoy = e.mom = e.revYm = null;
+  e.pe = numOr(st.f?.pe); if (e.pe != null) e.src.pe = "manual";
+  e.eps = numOr(st.f?.eps);
+  return e;
+}
 /* ---------- 美股：價格（美元）與匯率 ---------- */
 const US_NAMES = { NVDA: "輝達", AMD: "超微", MU: "美光", AVGO: "博通", AAPL: "蘋果", MSFT: "微軟", GOOGL: "Alphabet", AMZN: "亞馬遜", META: "Meta", TSLA: "特斯拉", TSM: "台積電 ADR", NFLX: "Netflix", INTC: "英特爾", QCOM: "高通", ARM: "安謀", SMCI: "美超微", ORCL: "甲骨文", CRM: "Salesforce", ADBE: "Adobe", PLTR: "Palantir", ASML: "艾司摩爾", AMAT: "應用材料", LRCX: "科林研發", KLAC: "科磊", MRVL: "邁威爾", DELL: "戴爾", IBM: "IBM", COST: "好市多", WMT: "沃爾瑪", JPM: "摩根大通", "BRK.B": "波克夏 B", V: "Visa", MA: "萬事達卡", KO: "可口可樂", PEP: "百事", DIS: "迪士尼", NKE: "Nike", MCD: "麥當勞", XOM: "埃克森美孚", CVX: "雪佛龍", LLY: "禮來", UNH: "聯合健康", JNJ: "嬌生", PFE: "輝瑞", BA: "波音", SPY: "SPDR 標普 500 ETF", QQQ: "那斯達克 100 ETF", VOO: "Vanguard 標普 500 ETF", VTI: "Vanguard 全市場 ETF", DIA: "道瓊 ETF", IWM: "羅素 2000 ETF", SOXX: "iShares 半導體 ETF", SMH: "VanEck 半導體 ETF", TQQQ: "三倍做多那斯達克 ETF", SOXL: "三倍做多半導體 ETF" };
-const usQuote = (code) => AUTO.liveUS?.q?.[code] || AUTO.market?.usq?.[code] || AUTO.market?.us?.[code] || null;
+const usQuote = (code) => AUTO.liveUS?.q?.[code] || AUTO.market?.usq?.[code] || AUTO.usExtra?.[code] || AUTO.market?.us?.[code] || null;
 const fxNow = () => AUTO.liveUS?.fx || AUTO.market?.us?.TWD?.close || null;
 const lastTradePrice = (code) => S.trades.filter((t) => t.code === code).sort((a, b) => b.time.localeCompare(a.time))[0]?.price ?? null;
 const priceOf = (code) => {
-  if (isUS(code)) return usQuote(code)?.close ?? null;
+  if (isUS(code)) { const w = S.watch.find((x) => x.code === code); return w ? eff(w).price : usQuote(code)?.close ?? null; }
   const w = S.watch.find((x) => x.code === code); if (w) return eff(w).price; const q = AUTO.quotes?.q?.[code]; return q ? q[1] : null;
 };
 const usd = (n, d = 2) => "US$" + fmt(n, d);
@@ -227,7 +270,7 @@ const usd = (n, d = 2) => "US$" + fmt(n, d);
 /* ---------- 四面向評分 ---------- */
 function newsFor(st) {
   const now = Date.now();
-  const auto = allNews().filter((n) => (n.t.includes(st.name) || n.t.includes(st.code)) && (!n.time || now - Date.parse(n.time) < 3 * 864e5));
+  const auto = allNews().filter((n) => mentions(n.t, st.code, st.name) && (!n.time || now - Date.parse(n.time) < 3 * 864e5));
   const mine = S.notes.filter((n) => (n.codes || []).includes(st.code));
   return [...mine.map((n) => ({ impact: +n.impact, t: n.title })), ...auto.map((n) => ({ impact: n.impact, t: n.t }))];
 }
@@ -238,7 +281,7 @@ function analyze(st) {
   out.ind = ind;
   const add = (g, v, txt) => { g.s += v; g.r.push({ v, txt }); g.ok = true; };
   const T = out.tech;
-  if (ind.n < 20) T.r.push({ v: 0, txt: `收盤價資料 ${ind.n} 筆，至少需要 20 筆才能計算月線${e.src.closes === "auto" ? "（每天會自動累積）" : ""}` });
+  if (ind.n < 20) T.r.push({ v: 0, txt: e.us && !e.closes.length ? (isUS(st.code) && !AUTO.usHist?.h?.[st.code] ? "這檔美股不在每日自動清單；接上即時轉送（Cloudflare Worker）後會自動抓 6 個月 K 線" : "美股 K 線資料下載中") : `收盤價資料 ${ind.n} 筆，至少需要 20 筆才能計算月線${e.src.closes === "auto" ? "（每天會自動累積）" : ""}` });
   if (px != null && ind.ma20 != null) {
     if (px > ind.ma20 && ind.ma5 > ind.ma20) add(T, 1, "股價站上月線，且 5 日線在月線之上（多頭排列）");
     else if (px < ind.ma20 && ind.ma5 < ind.ma20) add(T, -1, "股價跌破月線，且 5 日線在月線之下（空頭排列）");
@@ -276,7 +319,7 @@ function analyze(st) {
     else if (e.margin < -5 && chg5 >= 0) add(C, 0.5, `融資 5 日減少 ${-e.margin}%，籌碼沉澱`);
     else add(C, 0, `融資 5 日變化 ${e.margin}%`);
   }
-  if (!C.ok) C.r.push({ v: 0, txt: "還沒有三大法人或融資資料（每天約 15:00 後公布）" });
+  if (!C.ok) C.r.push({ v: 0, txt: e.us ? "美股沒有台股的三大法人、融資資料，籌碼面不列入評分" : "還沒有三大法人或融資資料（每天約 15:00 後公布）" });
   // 基本面
   const F = out.fund;
   if (e.yoy != null) e.yoy >= 20 ? add(F, 1, `月營收年增 ${e.yoy}%，成長強勁`) : e.yoy > 0 ? add(F, 0.4, `月營收年增 ${e.yoy}%`) : add(F, -1, `月營收年減 ${Math.abs(e.yoy)}%`);
@@ -288,7 +331,7 @@ function analyze(st) {
     else if (hi != null && e.pe >= hi) add(F, -1, `本益比 ${e.pe} 倍，高於你設定的昂貴區（${hi} 倍）`);
     else add(F, 0, `本益比 ${e.pe} 倍，在合理區間`);
   } else if (e.pe != null) F.r.push({ v: 0, txt: `本益比 ${e.pe} 倍（設定便宜／昂貴區間後才會評分）` });
-  if (!F.ok && !F.r.length) F.r.push({ v: 0, txt: "還沒有月營收或財報資料（月營收每月 10 日前公布）" });
+  if (!F.ok && !F.r.length) F.r.push({ v: 0, txt: e.us ? "美股沒有月營收資料；可在下方手動填 EPS 年增率、本益比後計入評分" : "還沒有月營收或財報資料（月營收每月 10 日前公布）" });
   // 消息面
   const N = out.news;
   if (st.news) add(N, st.news, st.news > 0 ? "你判斷消息面偏多" : "你判斷消息面偏空");
@@ -430,9 +473,15 @@ function myCodes() {
   for (const t of S.trades) if (!m.has(t.code)) m.set(t.code, t.name || "");
   return m;
 }
+/** 標題有沒有提到這檔：台股比對代號與股名；美股代號要前後不接英文字母（避免 V、MA 誤判），兩個字母以下只比對股名 */
+function mentions(t, code, name) {
+  if (name && name.length >= 2 && t.includes(name)) return true;
+  if (!isUS(code)) return t.includes(code);
+  return code.length >= 3 && new RegExp(`(?<![A-Za-z])${code.replace(".", "\\.")}(?![A-Za-z])`).test(t);
+}
 function relatedCodes(n, mine = myCodes()) {
   const out = new Set((n.codes || []).filter((c) => mine.has(c)));
-  for (const [c, name] of mine) if (n.t.includes(c) || (name && name.length >= 2 && n.t.includes(name))) out.add(c);
+  for (const [c, name] of mine) if (mentions(n.t, c, name)) out.add(c);
   return [...out];
 }
 function newsOf(cat, { all = false } = {}) {
@@ -765,8 +814,8 @@ function renderWatch() {
     const open = openCode === st.code;
     return `<div class="stock${open ? " open" : ""}">
       <button class="head" type="button" data-toggle="${esc(st.code)}" aria-expanded="${open}">
-        <div class="nm"><span>${esc(st.code)}</span><b>${esc(st.name)}</b>${a.pos ? ` <span class="chip info">持有 ${fmt(a.pos.qty)} 股</span>` : ""}</div>
-        <div class="px"><b class="${cls(e.chg)}">${e.price != null ? fmt(e.price, e.price < 100 ? 2 : 1) : "—"}</b><small class="${cls(e.chg)}">${e.chg != null ? (e.chg > 0 ? "▲" : e.chg < 0 ? "▼" : "") + fmt(Math.abs(e.chg), 2) + "　" + fmtP(pct) : e.src.price === "manual" ? "參考價" : ""}</small>${e.limit ? `<span class="stamp limit ${e.limit > 0 ? "bull" : "bear"}">${e.limit > 0 ? "漲停" : "跌停"}</span>` : ""}</div>
+        <div class="nm"><span>${esc(st.code)}</span><b>${esc(st.name)}</b>${e.us ? ` <span class="chip">美股</span>` : ""}${a.pos ? ` <span class="chip info">持有 ${fmt(a.pos.qty)} 股</span>` : ""}</div>
+        <div class="px"><b class="${cls(e.chg)}">${e.price != null ? (e.us ? "<i class=\"cur\">US$</i>" + fmt(e.price, 2) : fmt(e.price, e.price < 100 ? 2 : 1)) : "—"}</b><small class="${cls(e.chg)}">${e.chg != null ? (e.chg > 0 ? "▲" : e.chg < 0 ? "▼" : "") + fmt(Math.abs(e.chg), 2) + "　" + fmtP(pct) : e.src.price === "manual" ? "參考價" : ""}</small>${e.limit ? `<span class="stamp limit ${e.limit > 0 ? "bull" : "bear"}">${e.limit > 0 ? "漲停" : "跌停"}</span>` : ""}</div>
         <div class="sig"><span class="chip ${sigClass(a)}">${esc(sigLabel(a))}</span>${meterHtml(a.score)}</div>
       </button>
       ${open ? detailHtml(st, a) : ""}
@@ -789,7 +838,7 @@ function detailHtml(st, a) {
     <div class="actions"><button type="button" class="buy" data-trade="buy" data-code="${esc(st.code)}">買入</button><button type="button" class="sell" data-trade="sell" data-code="${esc(st.code)}">賣出</button></div>
     <div class="cols">
       <div class="box"><div class="row" style="justify-content:space-between"><h3>技術面 <small class="sub">35%</small></h3>${grpScore(a.tech)}</div>${statHtml(a.tech)}${reasonsHtml(a.tech)}
-        <dl class="kv"><dt>MA5／20／60</dt><dd>${fmt(i.ma5, 1)}／${fmt(i.ma20, 1)}／${fmt(i.ma60, 1)}</dd><dt>K／D</dt><dd>${fmt(i.k, 1)}／${fmt(i.d, 1)}</dd><dt>MACD 柱</dt><dd>${fmt(i.hist, 2)}</dd>${i.vol != null ? `<dt>成交量／20日均</dt><dd>${fmt(i.vol)}／${fmt(i.vol20)} 張</dd>` : ""}</dl>
+        <dl class="kv"><dt>MA5／20／60</dt><dd>${fmt(i.ma5, 1)}／${fmt(i.ma20, 1)}／${fmt(i.ma60, 1)}</dd><dt>K／D</dt><dd>${fmt(i.k, 1)}／${fmt(i.d, 1)}</dd><dt>MACD 柱</dt><dd>${fmt(i.hist, 2)}</dd>${i.vol != null ? `<dt>成交量／20日均</dt><dd>${fmt(i.vol)}／${fmt(i.vol20)} ${e.us ? "股" : "張"}</dd>` : ""}</dl>
         <p class="sub" style="margin:0">${esc(histNote)}</p></div>
       <div class="box"><div class="row" style="justify-content:space-between"><h3>籌碼面 <small class="sub">25%</small></h3>${grpScore(a.chip)}</div>${statHtml(a.chip)}${reasonsHtml(a.chip)}</div>
       <div class="box"><div class="row" style="justify-content:space-between"><h3>基本面 <small class="sub">25%</small></h3>${grpScore(a.fund)}</div>${statHtml(a.fund)}${reasonsHtml(a.fund)}${e.revYm ? `<p class="sub" style="margin:0">月營收資料：${esc(e.revYm)}</p>` : ""}</div>
@@ -805,11 +854,11 @@ function detailHtml(st, a) {
       <label>停利（%）<input name="take" type="number" step="0.5" min="0" value="${v(st.take)}"></label>
       <details class="full"><summary>手動補資料（自動資料缺漏時才會使用）</summary>
         <div class="form">
-          <label>外資近 5 日（張）${autoChip(e, "foreign")}<input name="foreign" type="number" step="1" value="${v(st.c?.foreign)}" ${ph(e.src.foreign === "auto" ? e.foreign : null, " 張")}></label>
-          <label>投信近 5 日（張）${autoChip(e, "trust")}<input name="trust" type="number" step="1" value="${v(st.c?.trust)}" ${ph(e.src.trust === "auto" ? e.trust : null, " 張")}></label>
-          <label>融資 5 日增減（%）${autoChip(e, "margin")}<input name="margin" type="number" step="0.1" value="${v(st.c?.margin)}" ${ph(e.src.margin === "auto" ? e.margin : null, "%")}></label>
-          <label>月營收 YoY（%）${autoChip(e, "yoy")}<input name="yoy" type="number" step="0.1" value="${v(st.f?.yoy)}" ${ph(e.src.yoy === "auto" ? e.yoy : null, "%")}></label>
-          <label>月營收 MoM（%）${autoChip(e, "mom")}<input name="mom" type="number" step="0.1" value="${v(st.f?.mom)}" ${ph(e.src.mom === "auto" ? e.mom : null, "%")}></label>
+          <label${e.us ? " hidden" : ""}>外資近 5 日（張）${autoChip(e, "foreign")}<input name="foreign" type="number" step="1" value="${v(st.c?.foreign)}" ${ph(e.src.foreign === "auto" ? e.foreign : null, " 張")}></label>
+          <label${e.us ? " hidden" : ""}>投信近 5 日（張）${autoChip(e, "trust")}<input name="trust" type="number" step="1" value="${v(st.c?.trust)}" ${ph(e.src.trust === "auto" ? e.trust : null, " 張")}></label>
+          <label${e.us ? " hidden" : ""}>融資 5 日增減（%）${autoChip(e, "margin")}<input name="margin" type="number" step="0.1" value="${v(st.c?.margin)}" ${ph(e.src.margin === "auto" ? e.margin : null, "%")}></label>
+          <label${e.us ? " hidden" : ""}>月營收 YoY（%）${autoChip(e, "yoy")}<input name="yoy" type="number" step="0.1" value="${v(st.f?.yoy)}" ${ph(e.src.yoy === "auto" ? e.yoy : null, "%")}></label>
+          <label${e.us ? " hidden" : ""}>月營收 MoM（%）${autoChip(e, "mom")}<input name="mom" type="number" step="0.1" value="${v(st.f?.mom)}" ${ph(e.src.mom === "auto" ? e.mom : null, "%")}></label>
           <label>本益比（倍）${autoChip(e, "pe")}<input name="pe" type="number" step="0.1" value="${v(st.f?.pe)}" ${ph(e.src.pe === "auto" ? e.pe : null, " 倍")}></label>
           <label class="full">每日收盤價（舊→新，逗號分隔；自動資料較多時不會使用）<textarea name="closes" rows="2">${esc((st.closes || []).join(", "))}</textarea></label>
         </div>
@@ -826,6 +875,7 @@ function detailHtml(st, a) {
 const chartRange = { n: (() => { const v = +lsGet("st.krange"); return [20, 60, 120].includes(v) ? v : 60; })() };
 const chartSel = {}; // code → 選取的 K 棒（從右邊數第幾根）
 function tvUrl(code) {
+  if (isUS(code)) return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(code.replace(".", "-"))}`;
   const mkt = AUTO.quotes?.q?.[code]?.[7] === "上櫃" ? "TPEX" : "TWSE";
   return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(mkt + ":" + code)}`;
 }
@@ -869,7 +919,7 @@ function candleHtml(st, e) {
   const isLive = e.liveBar && si === n - 1;
   const info = `<div class="kinfo"><span class="num">${esc(D?.[si] ? md(D[si]) : "")}${isLive ? ` 盤中 ${esc(liveTime() || "")}` : ""}</span>
     <span>開 <b class="num">${fmtP2(O?.[si])}</b></span><span>高 <b class="num">${fmtP2(H?.[si])}</b></span><span>低 <b class="num">${fmtP2(Lw?.[si])}</b></span><span>收 <b class="num ${cls(chg)}">${fmtP2(C[si])}</b></span>
-    <span class="${cls(chg)}">${chg != null ? (chg > 0 ? "▲" : chg < 0 ? "▼" : "") + fmt(Math.abs(chg), 2) + " " + fmtP((chg / prevC) * 100) : ""}</span>${Number.isFinite(V[si]) ? `<span>量 <b class="num">${fmt(V[si])}</b> 張</span>` : ""}</div>`;
+    <span class="${cls(chg)}">${chg != null ? (chg > 0 ? "▲" : chg < 0 ? "▼" : "") + fmt(Math.abs(chg), 2) + " " + fmtP((chg / prevC) * 100) : ""}</span>${Number.isFinite(V[si]) ? `<span>量 <b class="num">${fmt(V[si])}</b> ${e.us ? "股" : "張"}</span>` : ""}</div>`;
   const ranges = [[20, "1 月"], [60, "3 月"], [120, "6 月"]].map(([k, l]) => `<button type="button" data-krange="${k}" aria-pressed="${chartRange.n === k}">${l}</button>`).join("");
   return `<div class="kchart">
     <div class="khead"><div class="seg krange" role="group" aria-label="K 線期間">${ranges}</div><span class="sub"><span style="color:var(--ink)">┅</span> MA5　<span style="color:var(--sky)">━</span> MA20</span></div>
@@ -1215,13 +1265,14 @@ $("#noteForm").addEventListener("submit", (e) => {
 // 代號欄位：英文自動轉大寫、去掉空白
 for (const id of ["asCode", "tCode"]) $("#" + id).addEventListener("input", (e) => { const el = e.target, v = el.value.toUpperCase().replace(/\s/g, ""); if (v !== el.value) el.value = v; });
 $("#asCode").addEventListener("input", () => {
-  const q = AUTO.quotes?.q?.[$("#asCode").value.trim().toUpperCase()];
+  const c = $("#asCode").value.trim().toUpperCase(), q = AUTO.quotes?.q?.[c];
   if (q && q[0]) $("#asName").value = q[0];
+  else if (isUS(c) && US_NAMES[c]) $("#asName").value = US_NAMES[c];
 });
 $("#addStock").addEventListener("submit", async (e) => {
   e.preventDefault();
   const code = $("#asCode").value.trim().toUpperCase(), name = $("#asName").value.trim();
-  if (!CODE_RE.test(code)) { $("#asErr").textContent = "代號格式不對，例如 2330、00878"; return; }
+  if (!CODE_RE.test(code) && !isUS(code)) { $("#asErr").textContent = "代號格式不對，台股例如 2330、00878；美股例如 NVDA、BRK.B"; return; }
   if (S.watch.some((w) => w.code === code)) { $("#asErr").textContent = `${code} 已在觀察清單中`; return; }
   $("#asErr").textContent = "";
   S.watch.push(newStock(code, name));
@@ -1254,8 +1305,7 @@ $("#tradeForm").addEventListener("submit", async (e) => {
   $("#tErr").textContent = "";
   const name = $("#tName").value.trim() || S.watch.find((w) => w.code === code)?.name || AUTO.quotes?.q?.[code]?.[0] || US_NAMES[code] || "";
   S.trades.push(stamp({ id: uid(), acct: a, code, name, side, qty, price, fee, tax, ...(us ? { mkt: "us", fx: +fx.toFixed(4) } : {}), time: $("#tTime").value, note: $("#tNote").value.trim() }));
-  // 美股不加進觀察清單（觀察清單的技術分析用台股資料）
-  if (!us && !S.watch.some((w) => w.code === code)) { S.watch.push(newStock(code, name, price)); await loadHist([code]); }
+  if (!S.watch.some((w) => w.code === code)) { S.watch.push(newStock(code, name, price)); await loadHist([code]); }
   ["tQty", "tPrice", "tNote", "tFee", "tTax"].forEach((id) => { $("#" + id).value = ""; delete $("#" + id).dataset.touched; });
   $("#tTime").value = localInputNow(); curAcct = a; commit(); renderAccount(); renderWatch();
 });
@@ -1377,18 +1427,18 @@ async function pollQuote() {
 async function pollNews() {
   if (!liveOk || document.visibilityState !== "visible") return;
   try {
-    const w = [...myCodes()].filter(([c, n]) => CODE_RE.test(c) && n).slice(0, 30).map(([c, n]) => `${c}:${n.replace(/[\s"'<>&]/g, "").slice(0, 12)}`);
+    const w = [...myCodes()].filter(([c, n]) => (CODE_RE.test(c) || isUS(c)) && n).slice(0, 30).map(([c, n]) => `${c}:${n.replace(/[\s"'<>&]/g, "").slice(0, 12)}`);
     const j = await liveGet("/news?w=" + encodeURIComponent(w.join(",")));
     if (j && Array.isArray(j.items)) { AUTO.liveNews = j; if (!$("#v-news").hidden) renderTrend(); if (!typing()) renderWatch(); }
   } catch {}
 }
 async function pollUS() {
   if (!liveOk || document.visibilityState !== "visible") return;
-  const codes = [...new Set(S.trades.map((t) => t.code).filter(isUS))];
+  const codes = [...new Set([...S.watch.map((w) => w.code), ...S.trades.map((t) => t.code)].filter(isUS))];
   if (!codes.length && AUTO.liveUS) return;
   try {
     const j = await liveGet("/us?s=" + encodeURIComponent(codes.slice(0, 20).join(",")));
-    if (j && j.q) { AUTO.liveUS = j; if (!typing()) renderAccount(); }
+    if (j && j.q) { AUTO.liveUS = j; if (!typing()) { renderWatch(); renderAccount(); } }
   } catch {}
 }
 if (liveOk) {

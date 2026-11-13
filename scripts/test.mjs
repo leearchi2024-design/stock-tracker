@@ -231,6 +231,16 @@ t("手續費、證交稅、帳務", () => {
   assert.equal(l.holdings[0].mv, 240000);
 });
 
+t("美股日 K 解析", () => {
+  const base = Date.UTC(2026, 10, 10, 14, 30) / 1000;
+  const j = { chart: { result: [{ meta: { exchangeTimezoneName: "America/New_York" }, timestamp: [base, base + 86400, base + 86400 * 2, base + 86400 * 2 + 3600], indicators: { quote: [{ open: [100, 101, null, 103], high: [102, 104, 1, 105], low: [99, 100, 1, 102], close: [101.456, 103, null, 104], volume: [10, 20, 0, 30] }] } }] } };
+  const h = L.parseYahooOHLC(j);
+  assert.deepEqual(h.d, ["2026-11-10", "2026-11-11", "2026-11-12"]);
+  assert.deepEqual(h.c, [101.46, 103, 104]);
+  assert.deepEqual(h.o, [100, 101, 103]);
+  assert.equal(L.usFile("BRK.B"), "BRK-B");
+});
+
 t("美股帳務：美元價格＋匯率換算成新台幣", () => {
   assert.ok(isUS("NVDA") && isUS("BRK.B") && !isUS("2330") && !isUS("00878"));
   const st = { trades: [

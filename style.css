@@ -409,3 +409,4 @@ button.tick .more{position:absolute;right:9px;top:50%;transform:translateY(-50%)
 .toggle:active{transform:translate(2px,2px);box-shadow:none}
 .stock .px .stamp.limit{display:inline-block;margin-top:4px;font-size:13px}
 .wl .stock{scroll-margin-top:calc(var(--hdr,76px) + 12px)}
+.px b i.cur{font-style:normal;font-size:.55em;margin-right:2px;opacity:.75}

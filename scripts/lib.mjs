@@ -408,6 +408,26 @@ export function parseYahooSeries(j) {
   return d.length ? { d, c } : null;
 }
 
+/** Yahoo 日 K → 美股歷史 {d, c, o, h, l, v}（和台股的個股檔同格式，APP 可以直接畫 K 線、算指標） */
+export function parseYahooOHLC(j) {
+  const r = j?.chart?.result?.[0];
+  const ts = r?.timestamp, q = r?.indicators?.quote?.[0];
+  if (!Array.isArray(ts) || !q || !Array.isArray(q.close)) return null;
+  const tz = r?.meta?.exchangeTimezoneName || "America/New_York";
+  const f = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" });
+  const R = (x) => (Number.isFinite(x) ? Math.round(x * 100) / 100 : null);
+  const out = { d: [], c: [], o: [], h: [], l: [], v: [] };
+  ts.forEach((t, i) => {
+    if (!Number.isFinite(q.close[i])) return;
+    const d = f.format(new Date(t * 1000));
+    if (out.d[out.d.length - 1] === d) out.d.pop(), out.c.pop(), out.o.pop(), out.h.pop(), out.l.pop(), out.v.pop();
+    out.d.push(d); out.c.push(R(q.close[i])); out.o.push(R(q.open?.[i])); out.h.push(R(q.high?.[i])); out.l.push(R(q.low?.[i])); out.v.push(Number.isFinite(q.volume?.[i]) ? q.volume[i] : null);
+  });
+  return out.d.length ? out : null;
+}
+/** 美股代號 → 檔名（BRK.B → BRK-B） */
+export const usFile = (sym) => String(sym).replace(".", "-");
+
 /** 歷史資料庫最後一個有資料的交易日，外資、投信買賣超前 10 名（張）。 */
 export function instiRanking(store, names = {}, n = 10) {
   const top = {};

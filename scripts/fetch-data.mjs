@@ -136,7 +136,7 @@ async function main() {
   const now = tpeNow();
   log("台灣時間", now.date, now.hour + " 點", "SITE_URL=", SITE || "(未設定)");
 
-  const [pStore, pMarket, pQuotes, pRevenue, pNews, pStatus, pIntraday] = await Promise.all(["store.json", "market.json", "quotes.json", "revenue.json", "news.json", "status.json", "intraday.json"].map(prev));
+  const [pStore, pMarket, pQuotes, pRevenue, pNews, pStatus, pIntraday, pUsHist] = await Promise.all(["store.json", "market.json", "quotes.json", "revenue.json", "news.json", "status.json", "intraday.json", "ushist.json"].map(prev));
   const store = L.normalizeStore(pStore || L.emptyStore());
   Object.assign(status, pStatus?.sources || {});
   const FULL = MODE === "full" || !pStore || !pQuotes || !pMarket;
@@ -261,10 +261,14 @@ async function main() {
   // 美股下單用：常見美股與 ETF 的最新價（APP 的個人持股不會上傳，所以抓一份公開的熱門清單）
   market.usq = { ...(pMarket?.usq || {}) };
   let uOk = 0;
+  // 完整更新時順便抓 6 個月日 K，存成 data/ushist.json，股票追蹤頁的美股就能畫 K 線、做技術分析
+  const usHist = { ...(pUsHist?.h || {}) };
   for (const sym of L.US_POPULAR) {
     try {
-      const r = L.parseYahooChart(await get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym.replace(".", "-"))}?range=5d&interval=1d`));
+      const j = await get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(L.usFile(sym))}?range=${FULL ? "6mo" : "5d"}&interval=1d`);
+      const r = L.parseYahooChart(j);
       if (r) { market.usq[sym] = r; uOk++; }
+      if (FULL) { const h = L.parseYahooOHLC(j); if (h) usHist[sym] = h; }
     } catch (e) { log("Yahoo", sym, e.message); }
     await sleep(150);
   }
@@ -364,6 +368,7 @@ async function main() {
   await w("market.json", market);
   await w("revenue.json", revenue);
   await w("news.json", news);
+  await w("ushist.json", { updatedAt: new Date().toISOString(), h: usHist });
   await w("intraday.json", intraday || { at: null, date: null, time: null, q: {} });
   await w("status.json", { updatedAt: new Date().toISOString(), mode: FULL ? "full" : "news", fullAt: FULL ? new Date().toISOString() : pStatus?.fullAt || null, days: store.days.length, firstDay: store.days[0] || null, lastDay: store.days[store.days.length - 1] || null, sources: status });
   let shards = 0;
