@@ -74,35 +74,45 @@ export function taxOf(code, amt) {
   return Math.floor(amt * (String(code).startsWith("00") ? 0.001 : 0.003));
 }
 
-/** 依時間重算現金、平均成本與已實現損益。priceOf(code) 回傳目前價格或 null。 */
-export function ledgerOf(state, acctId, priceOf = () => null) {
+/** 美股代號：1–5 個英文字母，可帶 .B 之類的類別（例：NVDA、BRK.B） */
+export const US_RE = /^[A-Z]{1,5}(?:[.-][A-Z]{1,2})?$/;
+export const isUS = (code) => US_RE.test(String(code || ""));
+
+/**
+ * 依時間重算現金、平均成本與已實現損益（帳戶一律以新台幣計）。
+ * 美股交易的價格、手續費以美元記錄，t.fx 為成交當時的美元兌新台幣匯率。
+ * priceOf(code) 回傳目前價格（美股為美元）或 null；fxNow 為目前匯率。
+ */
+export function ledgerOf(state, acctId, priceOf = () => null, fxNow = null) {
   const tr = state.trades.filter((t) => !acctId || t.acct === acctId).slice().sort((a, b) => a.time.localeCompare(b.time) || String(a.id).localeCompare(String(b.id)));
   const pos = {};
   const plById = {};
   let cash = 0, realized = 0;
   for (const c of state.cash) if (!acctId || c.acct === acctId) cash += c.type === "deposit" ? +c.amt : -c.amt;
   for (const t of tr) {
-    const amt = t.qty * t.price;
-    const p = pos[t.code] || (pos[t.code] = { code: t.code, name: t.name, qty: 0, cost: 0, realized: 0 });
+    const us = isUS(t.code), fx = us ? +t.fx || +fxNow || 1 : 1;
+    const amtN = t.qty * t.price;
+    const p = pos[t.code] || (pos[t.code] = { code: t.code, name: t.name, us, qty: 0, cost: 0, costN: 0, realized: 0, fx });
     if (t.name) p.name = t.name;
+    p.fx = fx;
     if (t.side === "buy") {
-      const total = amt + (+t.fee || 0);
-      cash -= total; p.cost += total; p.qty += t.qty;
+      const totalN = amtN + (+t.fee || 0);
+      cash -= totalN * fx; p.cost += totalN * fx; p.costN += totalN; p.qty += t.qty;
     } else {
-      const net = amt - (+t.fee || 0) - (+t.tax || 0);
+      const net = (amtN - (+t.fee || 0) - (+t.tax || 0)) * fx;
       cash += net;
-      const avg = p.qty ? p.cost / p.qty : 0;
-      const basis = avg * Math.min(t.qty, p.qty);
+      const q = Math.min(t.qty, p.qty);
+      const basis = p.qty ? (p.cost / p.qty) * q : 0, basisN = p.qty ? (p.costN / p.qty) * q : 0;
       const pl = net - basis;
       p.realized += pl; realized += pl;
-      p.cost -= basis; p.qty -= t.qty;
-      if (p.qty <= 0) { p.qty = 0; p.cost = 0; }
+      p.cost -= basis; p.costN -= basisN; p.qty -= t.qty;
+      if (p.qty <= 0) { p.qty = 0; p.cost = 0; p.costN = 0; }
       plById[t.id] = pl;
     }
   }
   const list = Object.values(pos).map((p) => {
-    const px = priceOf(p.code);
-    return { ...p, avg: p.qty ? p.cost / p.qty : 0, px, mv: px != null ? px * p.qty : null };
+    const px = priceOf(p.code), rate = p.us ? +fxNow || p.fx : 1;
+    return { ...p, avg: p.qty ? p.costN / p.qty : 0, px, rate, mv: px != null ? px * p.qty * rate : null };
   });
   return { cash, realized, holdings: list.filter((p) => p.qty > 0), all: list, plById };
 }

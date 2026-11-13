@@ -408,3 +408,4 @@ button.tick .more{position:absolute;right:9px;top:50%;transform:translateY(-50%)
 .toggle[aria-pressed="true"] i::after{left:13px;background:var(--surface)}
 .toggle:active{transform:translate(2px,2px);box-shadow:none}
 .stock .px .stamp.limit{display:inline-block;margin-top:4px;font-size:13px}
+.wl .stock{scroll-margin-top:calc(var(--hdr,76px) + 12px)}

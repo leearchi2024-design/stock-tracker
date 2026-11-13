@@ -96,7 +96,6 @@
       <div class="dateline"><span id="mastDate">—</span><span id="mastStamp">—</span></div>
     </div>
     <nav class="subtabs" id="trendTabs" aria-label="資訊分類"></nav>
-    <div class="tape" id="tape"></div>
     <div class="desk">
       <div class="view">
         <div class="view" id="trendMain"></div>
@@ -132,6 +131,7 @@
 
   <!-- 股票追蹤 -->
   <section class="view" id="v-track" hidden>
+    <div class="tape" id="tape"></div>
     <div class="sec-head"><h2>股票追蹤</h2><span class="label" id="partyCount">PARTY</span></div>
     <p class="sub" style="margin:0">點開角色卡看四面向判斷；標「自動」的數據每天由公開資料更新。</p>
     <div class="notice info" id="refNote"></div>
@@ -171,13 +171,14 @@
             <div class="seg" role="group" aria-label="買賣"><button class="b" id="sideB" aria-pressed="true" type="button">買入</button><button class="s" id="sideS" aria-pressed="false" type="button">賣出</button></div></div>
           <form class="form two" id="tradeForm">
             <label class="full">帳戶<select id="tAcct"></select></label>
-            <label>股票代號<input id="tCode" list="codeList" required maxlength="6" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false"></label>
+            <label>股票代號<input id="tCode" list="codeList" required maxlength="8" placeholder="2330 或 NVDA" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false"></label>
             <label>名稱<input id="tName" maxlength="20"></label>
             <label>股數<input id="tQty" type="number" min="1" step="1" required placeholder="1000 = 1 張"></label>
-            <label>成交價<input id="tPrice" type="number" min="0" step="0.01" required></label>
+            <label id="tPriceLab">成交價<input id="tPrice" type="number" min="0" step="0.0001" required></label>
             <label class="full">成交時間<input id="tTime" type="datetime-local" required></label>
-            <label>手續費<input id="tFee" type="number" min="0" step="1"></label>
-            <label>證交稅<input id="tTax" type="number" min="0" step="1"></label>
+            <label id="tFeeLab">手續費<input id="tFee" type="number" min="0" step="0.01"></label>
+            <label id="tTaxLab">證交稅<input id="tTax" type="number" min="0" step="1"></label>
+            <label id="tFxRow" hidden>匯率（1 美元＝？元）<input id="tFx" type="number" min="1" step="0.001" placeholder="例 31.5"></label>
             <label class="full">備註（買賣理由）<input id="tNote" maxlength="120" placeholder="例：KD 低檔黃金交叉＋外資連買"></label>
             <dl class="kv full" id="tPreview"></dl>
             <button class="primary full" type="submit" id="tSubmit">記錄買入</button>

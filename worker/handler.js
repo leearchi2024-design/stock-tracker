@@ -55,6 +55,19 @@ async function handleQuote(url, ctx) {
   });
 }
 
+/** /us?s=NVDA,AAPL → 美股最新價（Yahoo，最多 20 檔，快取 60 秒），附美元兌新台幣匯率 */
+const US_SYM_RE = /^[A-Z]{1,5}(?:[.-][A-Z]{1,2})?$/;
+async function handleUS(url, ctx) {
+  const syms = [...new Set((url.searchParams.get("s") || "").split(",").map((x) => x.trim().toUpperCase()).filter((x) => US_SYM_RE.test(x)))].slice(0, 20);
+  const one = (sym) => cachedJson("us:" + sym, 60, ctx, async () => {
+    try { return parseYahooChart(await upstream(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym.replace(".", "-"))}?range=5d&interval=1d`)); } catch { return null; }
+  });
+  const [fx, ...rows] = await Promise.all([one("TWD=X"), ...syms.map(one)]);
+  const q = {};
+  syms.forEach((s, i) => { if (rows[i]) q[s] = rows[i]; });
+  return { at: new Date().toISOString(), fx: fx?.close ?? null, q };
+}
+
 const gnews = (q) => "https://news.google.com/rss/search?q=" + encodeURIComponent(q) + "&hl=zh-TW&gl=TW&ceid=TW:zh-Hant";
 async function feed(url, src, hints, ctx) {
   return cachedJson("f:" + url, 120, ctx, async () => {
@@ -96,6 +109,7 @@ export default {
     if (request.method !== "GET") return reply({ error: "只支援 GET" }, 405, origin);
     try {
       if (url.pathname === "/quote") return reply(await handleQuote(url, ctx), 200, origin);
+      if (url.pathname === "/us") return reply(await handleUS(url, ctx), 200, origin);
       if (url.pathname === "/news") return reply(await handleNews(url, ctx), 200, origin);
       return reply({ error: "找不到這個功能" }, 404, origin);
     } catch (e) {

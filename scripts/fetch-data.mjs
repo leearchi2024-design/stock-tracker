@@ -258,6 +258,17 @@ async function main() {
     } catch (e) { log("Yahoo", sym, e.message); }
     await sleep(350);
   }
+  // 美股下單用：常見美股與 ETF 的最新價（APP 的個人持股不會上傳，所以抓一份公開的熱門清單）
+  market.usq = { ...(pMarket?.usq || {}) };
+  let uOk = 0;
+  for (const sym of L.US_POPULAR) {
+    try {
+      const r = L.parseYahooChart(await get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym.replace(".", "-"))}?range=5d&interval=1d`));
+      if (r) { market.usq[sym] = r; uOk++; }
+    } catch (e) { log("Yahoo", sym, e.message); }
+    await sleep(150);
+  }
+  uOk ? ok("us_quotes", `${uOk}/${L.US_POPULAR.length}`) : fail("us_quotes", "Yahoo 全部失敗，沿用上次資料");
   if (!market.twiiSeries && pMarket?.twiiSeries) market.twiiSeries = pMarket.twiiSeries;
   yOk ? ok("us_market", `${yOk}/${Object.keys(YH).length}`) : fail("us_market", "Yahoo 全部失敗，沿用上次資料");
   if (!market.taiex && market.us.TWII) market.taiex = market.us.TWII;

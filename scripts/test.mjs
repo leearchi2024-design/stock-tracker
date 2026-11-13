@@ -1,7 +1,7 @@
 // 離線測試：node scripts/test.mjs
 import assert from "node:assert/strict";
 import * as L from "./lib.mjs";
-import { indicators, feeOf, taxOf, ledgerOf, normalizeState, mergeState, canon } from "../core.js";
+import { indicators, feeOf, taxOf, ledgerOf, normalizeState, mergeState, canon, isUS } from "../core.js";
 
 let n = 0;
 const t = (name, fn) => { fn(); n++; console.log("✓", name); };
@@ -229,6 +229,22 @@ t("手續費、證交稅、帳務", () => {
   assert.equal(Math.round(l.holdings[0].avg * 100) / 100, 232.33);
   assert.equal(Math.round(l.realized), Math.round(249890 - 464661 / 2));
   assert.equal(l.holdings[0].mv, 240000);
+});
+
+t("美股帳務：美元價格＋匯率換算成新台幣", () => {
+  assert.ok(isUS("NVDA") && isUS("BRK.B") && !isUS("2330") && !isUS("00878"));
+  const st = { trades: [
+    { id: "u1", acct: "m", code: "NVDA", side: "buy", qty: 10, price: 200, fee: 1, tax: 0, fx: 30, time: "2026-11-10T22:35" },
+    { id: "u2", acct: "m", code: "NVDA", side: "sell", qty: 4, price: 250, fee: 1, tax: 0, fx: 32, time: "2026-11-12T22:35" },
+  ], cash: [{ id: "c", acct: "m", type: "deposit", amt: 100000, time: "2026-11-01T09:00" }] };
+  const l = ledgerOf(st, "m", (c) => (c === "NVDA" ? 210 : null), 31);
+  assert.equal(Math.round(l.cash), 100000 - 2001 * 30 + 999 * 32);
+  const h = l.holdings[0];
+  assert.equal(h.qty, 6);
+  assert.equal(Math.round(h.avg * 100) / 100, 200.1);          // 均價以美元顯示
+  assert.equal(Math.round(h.cost), Math.round(60030 * 0.6));    // 成本以新台幣計
+  assert.equal(h.mv, 210 * 6 * 31);
+  assert.equal(Math.round(l.realized), Math.round(999 * 32 - 60030 * 0.4));
 });
 
 t("兩台裝置合併：新增、修改、刪除", () => {

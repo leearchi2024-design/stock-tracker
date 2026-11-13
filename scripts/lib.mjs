@@ -3,6 +3,8 @@
 
 export const FIELDS = ["c", "o", "h", "l", "v", "f", "t", "m"]; // 收盤、開盤、最高、最低、成交量(張)、外資買賣超(股)、投信買賣超(股)、融資餘額(張)
 export const MAX_DAYS = 130;
+/** 每次更新都抓收盤價的熱門美股與 ETF（下單紀錄打這些代號會自動帶入現價） */
+export const US_POPULAR = ["NVDA", "AMD", "MU", "AVGO", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "TSM", "NFLX", "INTC", "QCOM", "ARM", "SMCI", "ORCL", "CRM", "ADBE", "PLTR", "ASML", "AMAT", "LRCX", "KLAC", "MRVL", "DELL", "IBM", "COST", "WMT", "JPM", "BRK.B", "V", "MA", "KO", "PEP", "DIS", "NKE", "MCD", "XOM", "CVX", "LLY", "UNH", "JNJ", "PFE", "BA", "SPY", "QQQ", "VOO", "VTI", "DIA", "IWM", "SOXX", "SMH", "TQQQ", "SOXL"];
 // 股票與 ETF：4 碼（可帶一個英文字，如特別股 2881A）或 00 開頭的 ETF（0050、00878、00679B）。
 // 排除權證（6 碼數字）與可轉債（5 碼數字）。
 export const CODE_RE = /^(?:\d{4}[A-Z]?|00\d{2,4}[A-Z]?)$/;

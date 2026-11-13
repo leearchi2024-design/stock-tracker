@@ -1,4 +1,4 @@
-import { indicators, feeOf, taxOf, ledgerOf, normalizeState, mergeState, canon, tombKey } from "./core.js?v=dev";
+import { indicators, feeOf, taxOf, ledgerOf, normalizeState, mergeState, canon, tombKey, isUS } from "./core.js?v=dev";
 import * as Sync from "./sync.js?v=dev";
 
 /* ---------- 工具 ---------- */
@@ -28,7 +28,7 @@ const mdhm = (iso) => { if (!iso) return "—"; const t = tpeParts(new Date(iso)
 const md = (iso) => (iso ? `${+iso.slice(5, 7)}/${+iso.slice(8, 10)}` : "—");
 
 /* ---------- 自動資料（GitHub Actions 每天產生） ---------- */
-const AUTO = { market: null, news: null, quotes: null, revenue: null, status: null, intraday: null, live: null, liveNews: null, hist: {}, loadedAt: 0 };
+const AUTO = { market: null, news: null, quotes: null, revenue: null, status: null, intraday: null, live: null, liveNews: null, liveUS: null, hist: {}, loadedAt: 0 };
 const bust = () => Math.floor(Date.now() / 60000);
 async function getJson(p) {
   const r = await fetch(`${p}?t=${bust()}`, { cache: "no-store" });
@@ -213,7 +213,16 @@ function eff(st) {
   e.eps = numOr(st.f?.eps);
   return e;
 }
-const priceOf = (code) => { const w = S.watch.find((x) => x.code === code); if (w) return eff(w).price; const q = AUTO.quotes?.q?.[code]; return q ? q[1] : null; };
+/* ---------- 美股：價格（美元）與匯率 ---------- */
+const US_NAMES = { NVDA: "輝達", AMD: "超微", MU: "美光", AVGO: "博通", AAPL: "蘋果", MSFT: "微軟", GOOGL: "Alphabet", AMZN: "亞馬遜", META: "Meta", TSLA: "特斯拉", TSM: "台積電 ADR", NFLX: "Netflix", INTC: "英特爾", QCOM: "高通", ARM: "安謀", SMCI: "美超微", ORCL: "甲骨文", CRM: "Salesforce", ADBE: "Adobe", PLTR: "Palantir", ASML: "艾司摩爾", AMAT: "應用材料", LRCX: "科林研發", KLAC: "科磊", MRVL: "邁威爾", DELL: "戴爾", IBM: "IBM", COST: "好市多", WMT: "沃爾瑪", JPM: "摩根大通", "BRK.B": "波克夏 B", V: "Visa", MA: "萬事達卡", KO: "可口可樂", PEP: "百事", DIS: "迪士尼", NKE: "Nike", MCD: "麥當勞", XOM: "埃克森美孚", CVX: "雪佛龍", LLY: "禮來", UNH: "聯合健康", JNJ: "嬌生", PFE: "輝瑞", BA: "波音", SPY: "SPDR 標普 500 ETF", QQQ: "那斯達克 100 ETF", VOO: "Vanguard 標普 500 ETF", VTI: "Vanguard 全市場 ETF", DIA: "道瓊 ETF", IWM: "羅素 2000 ETF", SOXX: "iShares 半導體 ETF", SMH: "VanEck 半導體 ETF", TQQQ: "三倍做多那斯達克 ETF", SOXL: "三倍做多半導體 ETF" };
+const usQuote = (code) => AUTO.liveUS?.q?.[code] || AUTO.market?.usq?.[code] || AUTO.market?.us?.[code] || null;
+const fxNow = () => AUTO.liveUS?.fx || AUTO.market?.us?.TWD?.close || null;
+const lastTradePrice = (code) => S.trades.filter((t) => t.code === code).sort((a, b) => b.time.localeCompare(a.time))[0]?.price ?? null;
+const priceOf = (code) => {
+  if (isUS(code)) return usQuote(code)?.close ?? null;
+  const w = S.watch.find((x) => x.code === code); if (w) return eff(w).price; const q = AUTO.quotes?.q?.[code]; return q ? q[1] : null;
+};
+const usd = (n, d = 2) => "US$" + fmt(n, d);
 
 /* ---------- 四面向評分 ---------- */
 function newsFor(st) {
@@ -292,7 +301,7 @@ function analyze(st) {
   for (const k in W) if (out[k].ok) { tot += clamp(out[k].s) * W[k]; wsum += W[k]; }
   out.score = wsum ? tot / wsum : 0;
   // 持倉風控
-  const pos = ledgerOf(S, null, priceOf).holdings.find((h) => h.code === st.code) || null;
+  const pos = ledgerOf(S, null, priceOf, fxNow()).holdings.find((h) => h.code === st.code) || null;
   out.pos = pos;
   if (pos && px != null) {
     const pct = ((px - pos.avg) / pos.avg) * 100;
@@ -640,7 +649,7 @@ function renderTrend() {
   }).join("");
   renderStatus();
 }
-const SRC_NAMES = { intraday: "盤中報價", insti_total: "三大法人買賣金額", twse_quotes: "上市收盤價", tpex_quotes: "上櫃收盤價", twse_pe: "上市本益比", tpex_pe: "上櫃本益比", twse_insti: "上市三大法人", tpex_insti: "上櫃三大法人", twse_margin: "融資餘額", taiex: "加權指數", us_market: "美股與 ADR", revenue: "月營收", news: "新聞", backfill: "歷史補抓" };
+const SRC_NAMES = { intraday: "盤中報價", insti_total: "三大法人買賣金額", twse_quotes: "上市收盤價", tpex_quotes: "上櫃收盤價", twse_pe: "上市本益比", tpex_pe: "上櫃本益比", twse_insti: "上市三大法人", tpex_insti: "上櫃三大法人", twse_margin: "融資餘額", taiex: "加權指數", us_market: "美股與 ADR", us_quotes: "美股報價", revenue: "月營收", news: "新聞", backfill: "歷史補抓" };
 function renderStatus() {
   const st = AUTO.status;
   if (!st) { $("#srcStatus").innerHTML = `<p class="sub" style="margin:0">讀不到自動資料。若剛建立 GitHub 專案，請等 Actions 第一次跑完。</p>`; return; }
@@ -763,7 +772,7 @@ function renderWatch() {
       ${open ? detailHtml(st, a) : ""}
     </div>`;
   }).join("");
-  $("#codeList").innerHTML = S.watch.map((w) => `<option value="${esc(w.code)}">${esc(w.name)}</option>`).join("");
+  $("#codeList").innerHTML = S.watch.map((w) => `<option value="${esc(w.code)}">${esc(w.name)}</option>`).join("") + Object.entries(US_NAMES).map(([c, n]) => `<option value="${esc(c)}">${esc(n)}（美股）</option>`).join("");
 }
 function autoChip(e, k) { return e.src[k] === "auto" ? ` <span class="chip auto">自動</span>` : ""; }
 function detailHtml(st, a) {
@@ -932,7 +941,7 @@ function renderAccount() {
   if (curAcct !== "__all" && !S.accounts.some((a) => a.id === curAcct)) curAcct = S.accounts[0].id;
   const all = curAcct === "__all";
   $("#acctBar").innerHTML = S.accounts.map((a) => `<button type="button" aria-pressed="${a.id === curAcct}" data-acct="${esc(a.id)}">${esc(a.name)}</button>`).join("") + (S.accounts.length > 1 ? `<button type="button" aria-pressed="${all}" data-acct="__all">全部帳戶</button>` : "");
-  const L = ledgerOf(S, all ? null : curAcct, priceOf);
+  const L = ledgerOf(S, all ? null : curAcct, priceOf, fxNow());
   const cost = L.holdings.reduce((s, h) => s + h.cost, 0), mv = L.holdings.reduce((s, h) => s + (h.mv ?? h.cost), 0), un = mv - cost;
   const COIN = `<svg width="44" height="44" viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true"><rect x="2" y="0" width="4" height="1" fill="#2A2019"/><rect x="1" y="1" width="6" height="6" fill="#A8473A"/><rect x="0" y="2" width="1" height="4" fill="#2A2019"/><rect x="7" y="2" width="1" height="4" fill="#2A2019"/><rect x="1" y="1" width="1" height="1" fill="#2A2019"/><rect x="6" y="1" width="1" height="1" fill="#2A2019"/><rect x="1" y="6" width="1" height="1" fill="#2A2019"/><rect x="6" y="6" width="1" height="1" fill="#2A2019"/><rect x="2" y="7" width="4" height="1" fill="#2A2019"/><rect x="3" y="2" width="2" height="4" fill="#2A2019"/><rect x="2" y="2" width="1" height="1" fill="#ECE7DC"/></svg>`;
   const arrow = (n) => (n > 0 ? "▲" : n < 0 ? "▼" : "");
@@ -948,12 +957,13 @@ function renderAccount() {
       const pl = h.mv != null ? h.mv - h.cost : null, pp = pl != null ? (pl / h.cost) * 100 : null;
       const w = S.watch.find((x) => x.code === h.code), a = w ? analyze(w) : null;
       return `<div class="item"><div class="top">${esc(h.name || h.code)}<span>${esc(h.code)}</span></div>
-        <span class="qty">× ${fmt(h.qty)} 股</span>
-        <span class="sub">均價 <span class="num">${fmt(h.avg, 2)}</span>・現價 <span class="num">${h.px != null ? fmt(h.px, 2) : "—"}</span></span>
-        <span class="pl ${cls(pl)}">${pl != null ? arrow(pl) + fmt(Math.abs(pl)) + "<br>" + fmtP(pp) : "—"}</span>
-        ${a ? `<span><span class="chip ${sigClass(a)}">${esc(sigLabel(a))}</span></span>` : `<span class="sub">未在觀察清單</span>`}</div>`;
+        <span class="qty">× ${fmt(h.qty)} 股${h.us ? ` <span class="chip info">美股</span>` : ""}</span>
+        <span class="sub">均價 <span class="num">${h.us ? usd(h.avg) : fmt(h.avg, 2)}</span>・現價 <span class="num">${h.px != null ? (h.us ? usd(h.px) : fmt(h.px, 2)) : "—"}</span>${h.us ? `<br>匯率 <span class="num">${fmt(h.rate, 2)}</span>・市值 <span class="num">${h.mv != null ? fmt(h.mv) : "—"}</span> 元` : ""}</span>
+        <span class="pl ${cls(pl)}">${pl != null ? arrow(pl) + fmt(Math.abs(pl)) + "<br>" + fmtP(pp) : h.us ? `<small class="sub">沒有現價<br>（見下方說明）</small>` : "—"}</span>
+        ${a ? `<span><span class="chip ${sigClass(a)}">${esc(sigLabel(a))}</span></span>` : h.us ? `<span><button type="button" class="ghost" data-trade="sell" data-code="${esc(h.code)}">賣出</button></span>` : `<span class="sub">未在觀察清單</span>`}</div>`;
     }).join("")}${'<div class="item slot" aria-hidden="true"></div>'.repeat(slots)}</div>`
     : `<div class="empty"><span>道具欄是空的。先在「資金存入」放入資金，再用「下單紀錄」記下第一筆買入。</span></div>`;
+  if (L.holdings.some((h) => h.us && h.px == null)) $("#holdings").insertAdjacentHTML("beforeend", `<p class="sub" style="margin:8px 0 0">沒有現價的美股暫時以成本計入市值。常見美股與 ETF 每次更新都會自動抓價；其他代號要接上即時轉送（Cloudflare Worker）才抓得到。</p>`);
   const rows = [...S.trades.filter((t) => all || t.acct === curAcct).map((t) => ({ ...t, k: "t" })), ...S.cash.filter((c) => all || c.acct === curAcct).map((c) => ({ ...c, k: "c" }))].sort((a, b) => b.time.localeCompare(a.time));
   $("#histCount").textContent = rows.length ? `QUEST LOG・${rows.length} 筆` : "QUEST LOG";
   const an = (id) => S.accounts.find((a) => a.id === id)?.name || "";
@@ -961,10 +971,11 @@ function renderAccount() {
   $("#history").innerHTML = rows.length ? `<ol class="log">${rows.map((r) => {
       if (r.k === "c") return `<li><span class="kind">${r.type === "deposit" ? "存入" : "提出"}</span><span class="what">${r.type === "deposit" ? "資金存入" : "資金提出"}<small>${esc(when(r.time))}${all ? "・" + esc(an(r.acct)) : ""}</small></span>
         <span class="amt">${r.type === "deposit" ? "+" : "-"}${fmt(r.amt)}<small><span class="confirm" data-del="cash:${esc(r.id)}"><button type="button" class="ghost" data-delask>刪除</button></span></small></span></li>`;
-      const amt = r.qty * r.price, net = r.side === "buy" ? -(amt + (+r.fee || 0)) : amt - (+r.fee || 0) - (+r.tax || 0);
+      const us = isUS(r.code), fx = us ? +r.fx || 1 : 1;
+      const amt = r.qty * r.price, net = (r.side === "buy" ? -(amt + (+r.fee || 0)) : amt - (+r.fee || 0) - (+r.tax || 0)) * fx;
       const pl = L.plById[r.id];
       return `<li><span class="kind ${r.side}">${r.side === "buy" ? "買入" : "賣出"}</span>
-        <span class="what">${esc(r.name || r.code)} ${fmt(r.qty)} 股 × ${fmt(r.price, 2)}<small>${esc(when(r.time))}${all ? "・" + esc(an(r.acct)) : ""}・費 ${fmt(r.fee)}${r.side === "sell" ? "／稅 " + fmt(r.tax) : ""}</small>${r.note ? `<em>${esc(r.note)}</em>` : ""}</span>
+        <span class="what">${esc(r.name || r.code)} ${fmt(r.qty)} 股 × ${us ? usd(r.price) : fmt(r.price, 2)}<small>${esc(when(r.time))}${all ? "・" + esc(an(r.acct)) : ""}・${us ? `費 ${usd(+r.fee || 0)}・匯率 ${fmt(fx, 2)}` : `費 ${fmt(r.fee)}${r.side === "sell" ? "／稅 " + fmt(r.tax) : ""}`}</small>${r.note ? `<em>${esc(r.note)}</em>` : ""}</span>
         <span class="amt ${r.side === "sell" && pl != null ? cls(pl) : ""}">${r.side === "sell" && pl != null ? arrow(pl) + fmt(Math.abs(pl)) : (net > 0 ? "+" : "") + fmt(net)}<small>${r.side === "sell" && pl != null ? "已實現・" : ""}<span class="confirm" data-del="trades:${esc(r.id)}"><button type="button" class="ghost" data-delask>刪除</button></span></small></span></li>`;
     }).join("")}</ol>`
     : `<div class="empty"><span>還沒有任何紀錄。</span><br><button type="button" id="demoBtn" style="margin-top:10px">載入示範資料看看</button></div>`;
@@ -978,16 +989,35 @@ function renderAccount() {
   if (!$("#cTime").value) $("#cTime").value = localInputNow();
   tradePreview();
 }
+let tradeUS = null;
+/** 依代號切換台股／美股欄位（美股：美元、自填手續費、無證交稅、要填匯率） */
+function tradeMode(code) {
+  const us = isUS(code);
+  if (us === tradeUS) return us;
+  tradeUS = us;
+  $("#tFxRow").hidden = !us;
+  $("#tFx").required = us;
+  $("#tPriceLab").firstChild.textContent = us ? "成交價（美元）" : "成交價";
+  $("#tFeeLab").firstChild.textContent = us ? "手續費（美元）" : "手續費";
+  $("#tTaxLab").hidden = us;
+  $("#tQty").placeholder = us ? "美股以 1 股為單位" : "1000 = 1 張";
+  delete $("#tFee").dataset.touched; delete $("#tTax").dataset.touched;
+  if (us && !$("#tFx").value && fxNow()) $("#tFx").value = fxNow().toFixed(3);
+  return us;
+}
 function tradePreview() {
   const a = S.accounts.find((x) => x.id === $("#tAcct").value) || S.accounts[0];
   const q = +$("#tQty").value || 0, p = +$("#tPrice").value || 0, amt = q * p, code = $("#tCode").value.trim().toUpperCase();
-  if (!$("#tFee").dataset.touched) $("#tFee").value = amt ? feeOf(a, amt) : "";
-  if (!$("#tTax").dataset.touched) $("#tTax").value = side === "sell" && amt ? taxOf(code, amt) : side === "buy" ? 0 : "";
-  $("#tTax").disabled = side === "buy";
-  const fee = +$("#tFee").value || 0, tax = side === "sell" ? +$("#tTax").value || 0 : 0;
-  const L = ledgerOf(S, a.id, priceOf), h = L.holdings.find((x) => x.code === code);
-  const total = side === "buy" ? amt + fee : amt - fee - tax;
-  $("#tPreview").innerHTML = amt ? `<dt>成交金額</dt><dd>${fmt(amt)}</dd><dt>${side === "buy" ? "應付" : "應收"}</dt><dd><b>${fmt(total)}</b></dd><dt>帳戶現金</dt><dd>${fmt(L.cash)} → ${fmt(L.cash + (side === "buy" ? -total : total))}</dd>${h ? `<dt>目前持有</dt><dd>${fmt(h.qty)} 股（均價 ${fmt(h.avg, 2)}）</dd>` : ""}${side === "sell" && h ? `<dt>預估損益</dt><dd class="${cls(total - h.avg * q)}">${fmt(total - h.avg * q)}</dd>` : ""}` : "";
+  const us = tradeMode(code), fx = us ? +$("#tFx").value || 0 : 1;
+  if (!$("#tFee").dataset.touched) $("#tFee").value = us ? 0 : amt ? feeOf(a, amt) : "";
+  if (!$("#tTax").dataset.touched) $("#tTax").value = !us && side === "sell" && amt ? taxOf(code, amt) : side === "buy" || us ? 0 : "";
+  $("#tTax").disabled = side === "buy" || us;
+  const fee = +$("#tFee").value || 0, tax = side === "sell" && !us ? +$("#tTax").value || 0 : 0;
+  const L = ledgerOf(S, a.id, priceOf, fxNow()), h = L.holdings.find((x) => x.code === code);
+  const totalN = side === "buy" ? amt + fee : amt - fee - tax, total = totalN * fx;
+  const nat = (n) => (us ? usd(n) : fmt(n));
+  const plN = h ? totalN - h.avg * q : 0, pl = h ? total - (h.cost / h.qty) * q : 0;
+  $("#tPreview").innerHTML = amt ? `<dt>成交金額</dt><dd>${nat(amt)}</dd><dt>${side === "buy" ? "應付" : "應收"}</dt><dd><b>${nat(totalN)}</b>${us ? `<br>≈ ${fmt(total)} 元（匯率 ${fmt(fx, 3)}）` : ""}</dd><dt>帳戶現金</dt><dd>${fmt(L.cash)} → ${fmt(L.cash + (side === "buy" ? -total : total))}</dd>${h ? `<dt>目前持有</dt><dd>${fmt(h.qty)} 股（均價 ${nat(h.avg)}）</dd>` : ""}${side === "sell" && h ? `<dt>預估損益</dt><dd class="${cls(pl)}">${fmt(pl)} 元${us ? `（美元計 ${plN >= 0 ? "+" : "-"}${usd(Math.abs(plN))}）` : ""}</dd>` : ""}` : "";
   $("#tSubmit").textContent = side === "buy" ? "記錄買入" : "記錄賣出";
 }
 
@@ -1045,7 +1075,12 @@ document.addEventListener("click", (e) => {
   const t = e.target.closest("button,[data-toggle]");
   if (!t) return;
   const ds = t.dataset;
-  if (ds.toggle) { openCode = openCode === ds.toggle ? null : ds.toggle; renderWatch(); return; }
+  if (ds.toggle) {
+    openCode = openCode === ds.toggle ? null : ds.toggle; renderWatch();
+    // 展開後從這張卡的最上方開始看（上一張收起時畫面會跳動）
+    if (openCode) { const btn = [...document.querySelectorAll("#watch [data-toggle]")].find((b) => b.dataset.toggle === openCode); btn?.closest(".stock")?.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); }
+    return;
+  }
   if (ds.trend) { trendTab = ds.trend; lsSet("st.trend", trendTab); renderTrend(); return; }
   if ("major" in ds) { onlyMajor = !onlyMajor; lsSet("st.major", onlyMajor ? "1" : "0"); renderTrend(); return; }
   if (ds.addwatch) { if (!S.watch.some((w) => w.code === ds.addwatch)) { S.watch.push(newStock(ds.addwatch, ds.name || ds.addwatch)); commit(); renderWatch(); renderTrend(); } return; }
@@ -1059,7 +1094,7 @@ document.addEventListener("click", (e) => {
     side = ds.trade;
     $("#sideB").setAttribute("aria-pressed", side === "buy"); $("#sideS").setAttribute("aria-pressed", side === "sell");
     delete $("#tTax").dataset.touched; delete $("#tFee").dataset.touched;
-    $("#tCode").value = ds.code; $("#tName").value = w?.name || "";
+    $("#tCode").value = ds.code; $("#tName").value = w?.name || S.trades.find((t) => t.code === ds.code && t.name)?.name || US_NAMES[ds.code] || "";
     const px = priceOf(ds.code); $("#tPrice").value = px ?? "";
     if (side === "sell") { const h = ledgerOf(S, $("#tAcct").value || null, priceOf).holdings.find((x) => x.code === ds.code); $("#tQty").value = h ? h.qty : ""; }
     location.hash = "account"; tradePreview();
@@ -1193,11 +1228,11 @@ $("#addStock").addEventListener("submit", async (e) => {
   openCode = code; e.target.reset(); commit();
   await loadHist([code]); renderWatch();
 });
-["tQty", "tPrice", "tCode", "tAcct"].forEach((id) => $("#" + id).addEventListener("input", () => {
+["tQty", "tPrice", "tCode", "tAcct", "tFx"].forEach((id) => $("#" + id).addEventListener("input", () => {
   if (id === "tCode") {
     const c = $("#tCode").value.trim().toUpperCase();
     const w = S.watch.find((x) => x.code === c), q = AUTO.quotes?.q?.[c];
-    const nm = w?.name || q?.[0];
+    const nm = w?.name || q?.[0] || (isUS(c) ? US_NAMES[c] : "");
     if (nm) $("#tName").value = nm;
     const px = priceOf(c);
     if (!$("#tPrice").value && px) $("#tPrice").value = px;
@@ -1208,23 +1243,26 @@ $("#addStock").addEventListener("submit", async (e) => {
 $("#tradeForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const a = $("#tAcct").value, code = $("#tCode").value.trim().toUpperCase(), qty = Math.round(+$("#tQty").value), price = +$("#tPrice").value;
-  const fee = +$("#tFee").value || 0, tax = side === "sell" ? +$("#tTax").value || 0 : 0, L = ledgerOf(S, a, priceOf);
-  if (!CODE_RE.test(code)) { $("#tErr").textContent = "代號格式不對，例如 2330、00878"; return; }
+  const us = isUS(code), fx = us ? +$("#tFx").value : 1;
+  const fee = +$("#tFee").value || 0, tax = side === "sell" && !us ? +$("#tTax").value || 0 : 0, L = ledgerOf(S, a, priceOf, fxNow());
+  if (!CODE_RE.test(code) && !us) { $("#tErr").textContent = "代號格式不對，台股例如 2330、00878；美股例如 NVDA、BRK.B"; return; }
   if (!(qty > 0) || !(price > 0)) { $("#tErr").textContent = "請輸入大於 0 的股數與成交價"; return; }
-  if (side === "buy" && qty * price + fee > L.cash + 0.5) { $("#tErr").textContent = `現金不足：需要 ${fmt(qty * price + fee)}，帳戶只有 ${fmt(L.cash)}。請先在下方存入資金。`; return; }
+  if (us && !(fx > 1)) { $("#tErr").textContent = "請填美元兌新台幣匯率，例如 31.5"; return; }
+  if (side === "buy" && (qty * price + fee) * fx > L.cash + 0.5) { $("#tErr").textContent = `現金不足：需要 ${fmt((qty * price + fee) * fx)} 元，帳戶只有 ${fmt(L.cash)}。請先在下方存入資金。`; return; }
   const h = L.holdings.find((x) => x.code === code);
   if (side === "sell" && (!h || h.qty < qty)) { $("#tErr").textContent = `持股不足：此帳戶持有 ${code} ${fmt(h ? h.qty : 0)} 股`; return; }
   $("#tErr").textContent = "";
-  const name = $("#tName").value.trim() || S.watch.find((w) => w.code === code)?.name || AUTO.quotes?.q?.[code]?.[0] || "";
-  S.trades.push(stamp({ id: uid(), acct: a, code, name, side, qty, price, fee, tax, time: $("#tTime").value, note: $("#tNote").value.trim() }));
-  if (!S.watch.some((w) => w.code === code)) { S.watch.push(newStock(code, name, price)); await loadHist([code]); }
+  const name = $("#tName").value.trim() || S.watch.find((w) => w.code === code)?.name || AUTO.quotes?.q?.[code]?.[0] || US_NAMES[code] || "";
+  S.trades.push(stamp({ id: uid(), acct: a, code, name, side, qty, price, fee, tax, ...(us ? { mkt: "us", fx: +fx.toFixed(4) } : {}), time: $("#tTime").value, note: $("#tNote").value.trim() }));
+  // 美股不加進觀察清單（觀察清單的技術分析用台股資料）
+  if (!us && !S.watch.some((w) => w.code === code)) { S.watch.push(newStock(code, name, price)); await loadHist([code]); }
   ["tQty", "tPrice", "tNote", "tFee", "tTax"].forEach((id) => { $("#" + id).value = ""; delete $("#" + id).dataset.touched; });
   $("#tTime").value = localInputNow(); curAcct = a; commit(); renderAccount(); renderWatch();
 });
 $("#cashForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const amt = Math.round(+$("#cAmt").value), type = $("#cType").value, a = curAcct === "__all" ? S.accounts[0].id : curAcct;
-  const cash = ledgerOf(S, a, priceOf).cash;
+  const cash = ledgerOf(S, a, priceOf, fxNow()).cash;
   if (!(amt > 0)) { $("#cErr").textContent = "請輸入金額"; return; }
   if (type === "withdraw" && amt > cash) { $("#cErr").textContent = `可用現金只有 ${fmt(cash)}`; return; }
   $("#cErr").textContent = "";
@@ -1344,8 +1382,18 @@ async function pollNews() {
     if (j && Array.isArray(j.items)) { AUTO.liveNews = j; if (!$("#v-news").hidden) renderTrend(); if (!typing()) renderWatch(); }
   } catch {}
 }
+async function pollUS() {
+  if (!liveOk || document.visibilityState !== "visible") return;
+  const codes = [...new Set(S.trades.map((t) => t.code).filter(isUS))];
+  if (!codes.length && AUTO.liveUS) return;
+  try {
+    const j = await liveGet("/us?s=" + encodeURIComponent(codes.slice(0, 20).join(",")));
+    if (j && j.q) { AUTO.liveUS = j; if (!typing()) renderAccount(); }
+  } catch {}
+}
 if (liveOk) {
-  pollQuote(); pollNews();
+  pollQuote(); pollNews(); pollUS();
+  setInterval(pollUS, 60000);
   setInterval(pollQuote, 10000);
   setInterval(pollNews, 3 * 60000);
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { pollQuote(); if (Date.now() - Date.parse(AUTO.liveNews?.at || 0) > 3 * 60000) pollNews(); } });
